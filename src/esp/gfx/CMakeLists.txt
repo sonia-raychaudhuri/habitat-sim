@@ -69,6 +69,9 @@ if(BUILD_PTEX_SUPPORT)
 endif()
 
 if(BUILD_WITH_BACKGROUND_RENDERER)
+  message(
+    FATAL_ERROR "Let's put a fatal error here to ensure we're not trying to build this."
+  )
   list(APPEND gfx_SOURCES BackgroundRenderer.h BackgroundRenderer.cpp)
 endif()
 
@@ -134,6 +137,9 @@ target_link_libraries(
 )
 
 if(BUILD_WITH_BACKGROUND_RENDERER)
+  message(
+    FATAL_ERROR "Let's put a fatal error here to ensure we're not trying to build this."
+  )
   target_link_libraries(gfx PUBLIC atomic_wait)
 endif()
 

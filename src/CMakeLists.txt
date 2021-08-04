@@ -139,6 +139,11 @@ if(CORRADE_TARGET_EMSCRIPTEN)
   )
 endif()
 
+# temp force BUILD_WITH_BACKGROUND_RENDERER off
+set(BUILD_WITH_BACKGROUND_RENDERER OFF CACHE BOOL "BUILD_WITH_BACKGROUND_RENDERER"
+                                             FORCE
+)
+
 # add subdirectories
 add_subdirectory(esp)
 

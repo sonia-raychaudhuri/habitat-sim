@@ -14,6 +14,8 @@
 #include "esp/gfx/magnum.h"
 #include "esp/sensor/VisualSensor.h"
 
+#error Let's trigger a compile error here to make it obvious that we don't want to compile this source file.
+
 namespace Mn = Magnum;
 
 namespace esp {
