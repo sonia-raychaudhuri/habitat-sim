@@ -80,7 +80,7 @@ void initShortestPathBindings(py::module& m) {
            "meters_per_pixel"_a, "height"_a)
       .def("get_topdown_view_with_sampling", &PathFinder::getTopDownViewWithSampling,
            R"(Returns the topdown view of the PathFinder's navmesh with sampling.)",
-           "meters_per_pixel"_a, "height"_a, "num_samples"_a, "nav_threshold"_a)
+           "meters_per_pixel"_a, "height"_a, "num_samples"_a, "nav_threshold"_a, "vertical_slack"_a = 0.5)
       .def("get_random_navigable_point", &PathFinder::getRandomNavigablePoint,
            "max_tries"_a = 10)
       .def("find_path", py::overload_cast<ShortestPath&>(&PathFinder::findPath),

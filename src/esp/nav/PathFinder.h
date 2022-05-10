@@ -353,7 +353,8 @@ class PathFinder {
     float metersPerPixel,
     float height,
     int num_samples,
-    float nav_threshold);
+    float nav_threshold,
+    float vertical_slack);
 
   /**
    * @brief Returns a MeshData object containing triangulated NavMesh polys. The

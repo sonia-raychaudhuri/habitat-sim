@@ -266,7 +266,8 @@ struct PathFinder::Impl {
       float metersPerPixel,
       float height,
       int num_samples,
-      float nav_threshold) const;
+      float nav_threshold,
+      float vertical_slack) const;
 
   assets::MeshData::ptr getNavMeshData();
 
@@ -1301,7 +1302,8 @@ Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>
 PathFinder::Impl::getTopDownViewWithSampling(const float metersPerPixel,
                                  const float height,
                                  const int num_samples,
-                                 const float nav_threshold) const {
+                                 const float nav_threshold,
+                                 const float vertical_slack) const {
   std::pair<vec3f, vec3f> mapBounds = bounds();
   vec3f bound1 = mapBounds.first;
   vec3f bound2 = mapBounds.second;
@@ -1315,7 +1317,6 @@ PathFinder::Impl::getTopDownViewWithSampling(const float metersPerPixel,
   MatrixXb topdownMap(zResolution, xResolution);
 
   int _navigable_count = 0;
-  float vertical_slack = 0.5;
   float curz_s = 0.0;
   float curx_s = 0.0;
   float rand_x = 0.0;
@@ -1325,13 +1326,12 @@ PathFinder::Impl::getTopDownViewWithSampling(const float metersPerPixel,
   float curx = startx;
   for (int h = 0; h < zResolution; h++) {
     for (int w = 0; w < xResolution; w++) {
-      // Check the corner
-      vec3f point = vec3f(curx, height, curz);
-      topdownMap(h, w) = isNavigable(point, vertical_slack);
+      // Initialize
+      topdownMap(h, w) = false;
 
       // Sample random points within the grid box and check for navigability
       _navigable_count = 0;
-      for (int _sample = 0; _sample < num_samples; _sample++) {
+      for (int _sample = 0; _sample < (num_samples-1); _sample++) {
         rand_x = frand();
         rand_z = frand();
         curx_s = curx + (rand_x * metersPerPixel);
@@ -1342,6 +1342,12 @@ PathFinder::Impl::getTopDownViewWithSampling(const float metersPerPixel,
           _navigable_count = _navigable_count + 1;
         }
       }
+      // Check the original point for navigability
+      vec3f point = vec3f(curx, height, curz);
+      if (isNavigable(point, vertical_slack)) {
+        _navigable_count = _navigable_count + 1;
+      }
+
       float frac_nav = (float)_navigable_count / (float)num_samples;
       if (frac_nav >= nav_threshold) {
         // Mark the grid as navigable if fraction of navigable points is above nav_threshold
@@ -1503,8 +1509,9 @@ Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> PathFinder::getTopDownViewWi
     const float metersPerPixel,
     const float height,
     const int num_samples,
-    const float nav_threshold) {
-  return pimpl_->getTopDownViewWithSampling(metersPerPixel, height, num_samples, nav_threshold);
+    const float nav_threshold,
+    const float vertical_slack) {
+  return pimpl_->getTopDownViewWithSampling(metersPerPixel, height, num_samples, nav_threshold, vertical_slack);
 }
 
 assets::MeshData::ptr PathFinder::getNavMeshData() {
