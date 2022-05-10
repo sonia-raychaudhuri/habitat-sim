@@ -262,6 +262,12 @@ struct PathFinder::Impl {
       float metersPerPixel,
       float height) const;
 
+  Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> getTopDownViewWithSampling(
+      float metersPerPixel,
+      float height,
+      int num_samples,
+      float nav_threshold) const;
+
   assets::MeshData::ptr getNavMeshData();
 
  private:
@@ -1291,6 +1297,66 @@ PathFinder::Impl::getTopDownView(const float metersPerPixel,
   return topdownMap;
 }
 
+Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>
+PathFinder::Impl::getTopDownViewWithSampling(const float metersPerPixel,
+                                 const float height,
+                                 const int num_samples,
+                                 const float nav_threshold) const {
+  std::pair<vec3f, vec3f> mapBounds = bounds();
+  vec3f bound1 = mapBounds.first;
+  vec3f bound2 = mapBounds.second;
+
+  float xspan = std::abs(bound1[0] - bound2[0]);
+  float zspan = std::abs(bound1[2] - bound2[2]);
+  int xResolution = xspan / metersPerPixel;
+  int zResolution = zspan / metersPerPixel;
+  float startx = fmin(bound1[0], bound2[0]);
+  float startz = fmin(bound1[2], bound2[2]);
+  MatrixXb topdownMap(zResolution, xResolution);
+
+  int _navigable_count = 0;
+  float vertical_slack = 0.5;
+  float curz_s = 0.0;
+  float curx_s = 0.0;
+  float rand_x = 0.0;
+  float rand_z = 0.0;
+
+  float curz = startz;
+  float curx = startx;
+  for (int h = 0; h < zResolution; h++) {
+    for (int w = 0; w < xResolution; w++) {
+      // Check the corner
+      vec3f point = vec3f(curx, height, curz);
+      topdownMap(h, w) = isNavigable(point, vertical_slack);
+
+      // Sample random points within the grid box and check for navigability
+      _navigable_count = 0;
+      for (int _sample = 0; _sample < num_samples; _sample++) {
+        rand_x = frand();
+        rand_z = frand();
+        curx_s = curx + (rand_x * metersPerPixel);
+        curz_s = curz + (rand_z * metersPerPixel);
+
+        vec3f point = vec3f(curx_s, height, curz_s);
+        if (isNavigable(point, vertical_slack)) {
+          _navigable_count = _navigable_count + 1;
+        }
+      }
+      float frac_nav = (float)_navigable_count / (float)num_samples;
+      if (frac_nav >= nav_threshold) {
+        // Mark the grid as navigable if fraction of navigable points is above nav_threshold
+        topdownMap(h, w) = true;
+      }
+
+      curx = curx + metersPerPixel;
+    }
+    curz = curz + metersPerPixel;
+    curx = startx;
+  }
+
+  return topdownMap;
+}
+
 assets::MeshData::ptr PathFinder::Impl::getNavMeshData() {
   if (meshData_ == nullptr && isLoaded()) {
     meshData_ = assets::MeshData::create();
@@ -1431,6 +1497,14 @@ Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> PathFinder::getTopDownView(
     const float metersPerPixel,
     const float height) {
   return pimpl_->getTopDownView(metersPerPixel, height);
+}
+
+Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> PathFinder::getTopDownViewWithSampling(
+    const float metersPerPixel,
+    const float height,
+    const int num_samples,
+    const float nav_threshold) {
+  return pimpl_->getTopDownViewWithSampling(metersPerPixel, height, num_samples, nav_threshold);
 }
 
 assets::MeshData::ptr PathFinder::getNavMeshData() {
