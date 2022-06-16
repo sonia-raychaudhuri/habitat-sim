@@ -346,6 +346,22 @@ class PathFinder {
       float height);
 
   /**
+   * @brief Get the Top Down View With Sampling
+   * 
+   * @param metersPerPixel 
+   * @param height 
+   * @param num_samples 
+   * @param nav_threshold 
+   * @return Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> 
+   */
+  Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> getTopDownViewWithSampling(
+    float metersPerPixel,
+    float height,
+    int num_samples,
+    float nav_threshold,
+    float vertical_slack);
+
+  /**
    * @brief Returns a MeshData object containing triangulated NavMesh polys. The
    * object is generated and stored if this is the first query.
    *
