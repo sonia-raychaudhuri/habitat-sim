@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -91,7 +91,7 @@ LightSetup getLightsAtBoxCorners(
 LightSetup getDefaultLights();
 
 /**
- * @brief Get get a single, combined ambient light color for use with the Phong
+ * @brief Get a single, combined ambient light color for use with the Phong
  * lighting model.
  */
 Magnum::Color3 getAmbientLightColor(const LightSetup& lightSetup);

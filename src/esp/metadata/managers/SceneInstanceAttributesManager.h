@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -47,6 +47,14 @@ class SceneInstanceAttributesManager
   attributes::SceneInstanceAttributes::ptr createObject(
       const std::string& sceneInstanceHandle,
       bool registerTemplate = true) override;
+
+  /**
+   * @brief Set the curent default PbrShaderAttributes to use on all new scene
+   * instances. This can be overridden from within individual scene instances.
+   */
+  void setDefaultPbrShaderAttrHandle(const std::string& pbrHandle) {
+    defaultPbrShaderAttributesHandle_ = pbrHandle;
+  }
 
   /**
    * @brief Method to take an existing attributes and set its values from passed
@@ -119,9 +127,9 @@ class SceneInstanceAttributesManager
    * @param attributes the attributes to populate with JSON values
    * @param jCell JSON document to parse
    */
-  void loadAbstractObjectAttributesFromJson(
+  void setAbstractObjectAttributesFromJson(
       const attributes::SceneObjectInstanceAttributes::ptr& attributes,
-      const io::JsonGenericValue& jCell) const;
+      const io::JsonGenericValue& jCell);
 
   /**
    * @brief Used Internally.  Create and configure newly-created scene instance
@@ -179,14 +187,10 @@ class SceneInstanceAttributesManager
       CORRADE_UNUSED bool forceRegistration) override;
 
   /**
-   * @brief This function is meaningless for this manager's ManagedObjects.
-   * @param handle Ignored.
-   * @return false
+   * @brief Name of the attributes used for the default Pbr/Ibl shader
+   * configuration. This can be overwritten by the SceneInstances.
    */
-  bool isValidPrimitiveAttributes(
-      CORRADE_UNUSED const std::string& handle) override {
-    return false;
-  }
+  std::string defaultPbrShaderAttributesHandle_ = "";
 
  public:
   ESP_SMART_POINTERS(SceneInstanceAttributesManager)

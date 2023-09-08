@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -17,8 +17,8 @@ Drawable::Drawable(scene::SceneNode& node,
     : Magnum::SceneGraph::Drawable3D{node, group},
       type_(type),
       node_(node),
-      mesh_(mesh),
-      drawableId_(drawableIdCounter++) {
+      drawableId_(drawableIdCounter++),
+      mesh_(mesh) {
   if (group) {
     group->registerDrawable(*this);
   }

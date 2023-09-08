@@ -1,3 +1,7 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 # [setup]
 import math
 import os
@@ -62,7 +66,6 @@ def make_configuration(scene_file):
     # simulator configuration
     backend_cfg = habitat_sim.SimulatorConfiguration()
     backend_cfg.scene_id = scene_file
-    backend_cfg.enable_physics = True
 
     # sensor configurations
     # Note: all sensors must have the same resolution
@@ -94,6 +97,7 @@ def make_configuration(scene_file):
 
 
 # [/setup]
+
 
 # This is wrapped such that it can be added to a unit test
 def main(show_imgs=True, save_imgs=False):

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -13,7 +13,8 @@
 
 #include "RigidBase.h"
 #include "esp/core/Esp.h"
-#include "esp/io/URDFParser.h"
+#include "esp/metadata/URDFParser.h"
+#include "esp/metadata/attributes/ArticulatedObjectAttributes.h"
 #include "esp/scene/SceneNode.h"
 
 namespace esp {
@@ -25,11 +26,6 @@ class DrawableGroup;
 namespace assets {
 class ResourceManager;
 }
-
-namespace io {
-struct URDFLinkContactInfo;
-struct UrdfLink;
-}  // namespace io
 
 namespace physics {
 
@@ -419,6 +415,21 @@ class ArticulatedObject : public esp::physics::PhysicsObjectBase {
   std::vector<int> getLinkIds() const {
     std::vector<int> ids;
     ids.reserve(links_.size());
+    for (auto it = links_.begin(); it != links_.end(); ++it) {
+      ids.push_back(it->first);
+    }
+    return ids;
+  }
+
+  /**
+   * @brief Get a list of link ids including the base (-1).
+   *
+   * @return A list of link ids for this object.
+   */
+  std::vector<int> getLinkIdsWithBase() const {
+    std::vector<int> ids;
+    ids.reserve(links_.size() + 1);
+    ids.push_back(-1);
     for (auto it = links_.begin(); it != links_.end(); ++it) {
       ids.push_back(it->first);
     }

@@ -1,3 +1,7 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 import glob
 from os import path as osp
 
@@ -155,7 +159,7 @@ def test_greedy_follower(test_navmesh, move_filter_fn, action_noise, pbar):
 
             agent.act(next_action)
 
-            agent_distance += np.linalg.norm(last_xyz - agent.state.position)
+            agent_distance += float(np.linalg.norm(last_xyz - agent.state.position))
             last_xyz = agent.state.position
 
             num_acts += 1

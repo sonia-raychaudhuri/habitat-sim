@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -27,18 +27,26 @@
 #include "esp/assets/CollisionMeshData.h"
 #include "esp/assets/GenericSemanticMeshData.h"
 #include "esp/assets/MeshMetaData.h"
-#include "esp/assets/ResourceManager.h"
 #include "esp/gfx/DrawableGroup.h"
-#include "esp/io/URDFParser.h"
+#include "esp/metadata/URDFParser.h"
 #include "esp/physics/objectWrappers/ManagedArticulatedObject.h"
 #include "esp/physics/objectWrappers/ManagedRigidObject.h"
 #include "esp/scene/SceneNode.h"
 
 namespace esp {
+namespace assets {
+class ResourceManager;
+}
 //! core physics simulation namespace
 namespace sim {
 class Simulator;
 }
+namespace metadata {
+namespace attributes {
+class PhysicsManagerAttributes;
+}
+}  // namespace metadata
+
 namespace physics {
 
 /** @brief Holds information about one ray hit instance. */
@@ -223,7 +231,8 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    */
   explicit PhysicsManager(
       assets::ResourceManager& _resourceManager,
-      const metadata::attributes::PhysicsManagerAttributes::cptr&
+      const std::shared_ptr<
+          const metadata::attributes::PhysicsManagerAttributes>&
           _physicsManagerAttributes);
 
   /** @brief Destructor*/
@@ -265,14 +274,12 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    * Attributes Manager.
    * @param stageInstanceAttributes The stage instance attributes that was used
    * to create this stage. Might be empty.
-   * @param meshGroup collision meshs for the scene.
    * @return true if successful and false otherwise
    */
   bool addStage(
       const metadata::attributes::StageAttributes::ptr& initAttributes,
       const metadata::attributes::SceneObjectInstanceAttributes::cptr&
-          stageInstanceAttributes,
-      const std::vector<assets::CollisionMeshData>& meshGroup);
+          stageInstanceAttributes);
 
   /**
    * @brief Instance and place a physics object from a @ref
@@ -311,18 +318,7 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    */
   int addObject(const std::string& attributesHandle,
                 scene::SceneNode* attachmentNode = nullptr,
-                const std::string& lightSetup = DEFAULT_LIGHTING_KEY) {
-    esp::metadata::attributes::ObjectAttributes::ptr attributes =
-        resourceManager_.getObjectAttributesManager()->getObjectCopyByHandle(
-            attributesHandle);
-    if (!attributes) {
-      ESP_ERROR() << "Object creation failed due to unknown attributes"
-                  << attributesHandle;
-      return ID_UNDEFINED;
-    }
-    // attributes exist, get drawables if valid simulator accessible
-    return addObjectQueryDrawables(attributes, attachmentNode, lightSetup);
-  }  // PhysicsManager::addObject
+                const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
 
   /** @brief Instance a physical object from an object properties template in
    * the @ref esp::metadata::managers::ObjectAttributesManager by template
@@ -338,18 +334,7 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    */
   int addObject(int attributesID,
                 scene::SceneNode* attachmentNode = nullptr,
-                const std::string& lightSetup = DEFAULT_LIGHTING_KEY) {
-    const esp::metadata::attributes::ObjectAttributes::ptr attributes =
-        resourceManager_.getObjectAttributesManager()->getObjectCopyByID(
-            attributesID);
-    if (!attributes) {
-      ESP_ERROR() << "Object creation failed due to unknown attributes ID"
-                  << attributesID;
-      return ID_UNDEFINED;
-    }
-    // attributes exist, get drawables if valid simulator accessible
-    return addObjectQueryDrawables(attributes, attachmentNode, lightSetup);
-  }  // PhysicsManager::addObject
+                const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
 
   /** @brief Queries simulator for drawables, if simulator exists, otherwise
    * passes nullptr, before instancing a physical object from an object
@@ -368,11 +353,9 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
       scene::SceneNode* attachmentNode = nullptr,
       const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
 
-  /** @brief Instance a physical object from an object properties template in
-   * the @ref esp::metadata::managers::ObjectAttributesManager by template
-   * handle.
-   * @param objectAttributes The object's template in @ref
-   * esp::metadata::managers::ObjectAttributesManager.
+  /** @brief Instance a physical object from an ObjectAttributes template.
+   * @param objectAttributes The object's template to use to instantiate the
+   * object.
    * @param drawables Reference to the scene graph drawables group to enable
    * rendering of the newly initialized object.
    * @param attachmentNode If supplied, attach the new physical object to an
@@ -392,12 +375,6 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    * Overridden if called by dynamics-library-enabled PhysicsManager
    */
   virtual ManagedRigidObject::ptr getRigidObjectWrapper();
-
-  /**
-   * @brief Create an articulated object wrapper appropriate for this physics
-   * manager. Overridden if called by dynamics-library-enabled PhysicsManager
-   */
-  virtual ManagedArticulatedObject::ptr getArticulatedObjectWrapper();
 
   /** @brief Remove an object instance from the pysical scene by ID, destroying
    * its scene graph node and removing it from @ref
@@ -433,40 +410,123 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
     return v;
   }
 
-  /** @brief Get a list of existing object IDs for articulated objects (i.e.,
-   * existing keys in @ref PhysicsManager::existingArticulatedObjects_.)
-   *  @return List of object ID keys from @ref
-   * PhysicsManager::existingArticulatedObjects_.
-   */
-  std::vector<int> getExistingArticulatedObjectIds() const {
-    std::vector<int> v;
-    v.reserve(existingArticulatedObjects_.size());
-    for (const auto& bro : existingArticulatedObjects_) {
-      v.push_back(bro.first);
-    }
-    return v;
-  }
-
   //============= ArticulatedObject functions =============
 
   /**
-   * @brief Add an instance of an  @ref ArticulatedObject in the world.
-   *
-   * @param filepath the file location for the articulated object's model
-   * @param aObjInstAttributes the relevant instancing values for the
-   * articulated object
+   * @brief Instance and place an @ref ArticulatedObject from a @ref
+   * esp::metadata::attributes::SceneAOInstanceAttributes file.
+   * @param aObjInstAttributes The attributes that describe the desired initial
+   * state to set for this articulated object.
+   * @param attributesHandle The handle of the @ref ArticulatedObject attributes
+   * used as the key to query @ref esp::metadata::managers::AOAttributesManager
+   * for the attributes.
    * @param lightSetup The string name of the desired lighting setup to use.
-   *
-   * @return A unique id for the @ref ArticulatedObject, allocated from the same
-   * id set as rigid objects.
+   * @return The instanced @ref ArticulatedObject 's ID, mapping to the articulated
+   * object in @ref PhysicsManager::existingObjects_ if successful, or
+   * @ref esp::ID_UNDEFINED. These values come from the same pool used
+   * by rigid objects.
    */
-
   int addArticulatedObjectInstance(
-      const std::string& filepath,
       const std::shared_ptr<
           const esp::metadata::attributes::SceneAOInstanceAttributes>&
           aObjInstAttributes,
+      const std::string& attributesHandle,
       const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
+
+  /**
+   * @brief Instance an @ref ArticulatedObject from an
+   * @ref esp::metadata::attributes::ArticulatedObjectAttributes retrieved from the
+   * @ref esp::metadata::managers::AOAttributesManager by the given
+   * @p attributesHandle . This method calls @p
+   * addArticulatedObjectQueryDrawables to provide drawables.
+   *
+   * @param attributesHandle The handle of the ArticulatedObjectAttributes to
+   * use to create the desired @ref ArticulatedObject
+   * @param forceReload If true, reload the source URDF from file, replacing the
+   * cached model.
+   * @param lightSetup The string name of the desired lighting setup to use.
+   * @return The instanced @ref ArticulatedObject 's ID, mapping to the articulated
+   * object in @ref PhysicsManager::existingObjects_ if successful, or
+   * @ref esp::ID_UNDEFINED. These values come from the same pool used
+   * by rigid objects.
+   */
+  int addArticulatedObject(
+      const std::string& attributesHandle,
+      bool forceReload = false,
+      const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
+
+  /**
+   * @brief Instance an @ref ArticulatedObject from an
+   * @ref esp::metadata::attributes::ArticulatedObjectAttributes retrieved from the
+   * @ref esp::metadata::managers::AOAttributesManager by the given
+   * @p attributesID . This method calls @p
+   * addArticulatedObjectQueryDrawables to provide drawables.
+   *
+   * @param attributesID The ID of the ArticulatedObjectAttributes to
+   * use to create the desired @ref ArticulatedObject
+   * @param forceReload If true, reload the source URDF from file, replacing the
+   * cached model.
+   * @param lightSetup The string name of the desired lighting setup to use.
+   * @return The instanced @ref ArticulatedObject 's ID, mapping to the articulated
+   * object in @ref PhysicsManager::existingObjects_ if successful, or
+   * @ref esp::ID_UNDEFINED. These values come from the same pool used
+   * by rigid objects.
+   */
+  int addArticulatedObject(
+      int attributesID,
+      bool forceReload = false,
+      const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
+
+  /**
+   * @brief Queries simulator for drawables, if simulator exists, otherwise
+   * passes nullptr, before instancing an articulated object from an
+   * @ref esp::metadata::attributes::ArticulatedObjectAttributes template
+   *
+   * @param artObjAttributes The @ref ArticulatedObject's template to use to create it.
+   * @param forceReload If true, reload the source URDF from file, replacing the
+   * cached model.
+   * @param lightSetup The string name of the desired lighting setup to use.
+   * @return The instanced @ref ArticulatedObject 's ID, mapping to the articulated
+   * object in @ref PhysicsManager::existingObjects_ if successful, or
+   * @ref esp::ID_UNDEFINED. These values come from the same pool used
+   * by rigid objects.
+   */
+  int addArticulatedObjectQueryDrawables(
+      const esp::metadata::attributes::ArticulatedObjectAttributes::ptr&
+          artObjAttributes,
+      bool forceReload = false,
+      const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
+
+  /**
+   * @brief Load, parse, and import a URDF file instantiating an @ref
+   * ArticulatedObject in the world based on the urdf filepath specified in @ref
+   * esp::metadata::attributes::ArticulatedObjectAttributes. This version
+   * requires drawables to be provided.
+   *
+   * Not implemented in base PhysicsManager.
+   * @param artObjAttributes The @ref ArticulatedObject's template to use to create it.
+   * @param drawables Reference to the scene graph drawables group to enable
+   * rendering of the newly initialized @ref ArticulatedObject.
+   * @param forceReload If true, force the reload of the source URDF from file,
+   * replacing the cached model if it exists.
+   * @param lightSetup The string name of the desired lighting setup to use.
+   *
+   * @return The instanced @ref ArticulatedObject 's ID, mapping to the articulated
+   * object in @ref PhysicsManager::existingObjects_ if successful, or
+   * @ref esp::ID_UNDEFINED. These values come from the same pool used
+   * by rigid objects.
+   */
+  virtual int addArticulatedObject(
+      CORRADE_UNUSED const
+          esp::metadata::attributes::ArticulatedObjectAttributes::ptr&
+              artObjAttributes,
+      CORRADE_UNUSED DrawableGroup* drawables,
+      CORRADE_UNUSED bool forceReload = false,
+      CORRADE_UNUSED const std::string& lightSetup = DEFAULT_LIGHTING_KEY) {
+    ESP_ERROR() << "Not implemented in base PhysicsManager. Install with "
+                   "--bullet to use this feature.";
+    return ID_UNDEFINED;
+  }
 
   /**
    * @brief Load, parse, and import a URDF file instantiating an @ref
@@ -487,22 +547,24 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    * cached model.
    * @param maintainLinkOrder If true, maintain the order of link definitions
    * from the URDF file as the link indices.
+   * @param intertiaFromURDF If true, load the link inertia matrices from the
+   * URDF file instead of computing automatically from collision shapes.
    * @param lightSetup The string name of the desired lighting setup to use.
    *
-   * @return A unique id for the @ref BulletArticulatedObject, allocated from
-   * the same id set as rigid objects.
+   * @return The instanced @ref ArticulatedObject 's ID, mapping to the articulated
+   * object in @ref PhysicsManager::existingObjects_ if successful, or
+   * @ref esp::ID_UNDEFINED. These values come from the same pool used
+   * by rigid objects.
    */
-  virtual int addArticulatedObjectFromURDF(
-      CORRADE_UNUSED const std::string& filepath,
-      CORRADE_UNUSED bool fixedBase = false,
-      CORRADE_UNUSED float globalScale = 1.0,
-      CORRADE_UNUSED float massScale = 1.0,
-      CORRADE_UNUSED bool forceReload = false,
-      CORRADE_UNUSED bool maintainLinkOrder = false,
-      CORRADE_UNUSED const std::string& lightSetup = DEFAULT_LIGHTING_KEY) {
-    ESP_DEBUG() << "Not implemented in base PhysicsManager.";
-    return ID_UNDEFINED;
-  }
+  int addArticulatedObjectFromURDF(
+      const std::string& filepath,
+      bool fixedBase = false,
+      float globalScale = 1.0,
+      float massScale = 1.0,
+      bool forceReload = false,
+      bool maintainLinkOrder = false,
+      bool intertiaFromURDF = false,
+      const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
 
   /**
    * @brief Load, parse, and import a URDF file instantiating an @ref
@@ -523,23 +585,25 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    * cached model.
    * @param maintainLinkOrder If true, maintain the order of link definitions
    * from the URDF file as the link indices.
+   * @param intertiaFromURDF If true, load the link inertia matrices from the
+   * URDF file instead of computing automatically from collision shapes.
    * @param lightSetup The string name of the desired lighting setup to use.
    *
-   * @return A unique id for the @ref ArticulatedObject, allocated from the same
-   * id set as rigid objects.
+   * @return The instanced @ref ArticulatedObject 's ID, mapping to the articulated
+   * object in @ref PhysicsManager::existingObjects_ if successful, or
+   * @ref esp::ID_UNDEFINED. These values come from the same pool used
+   * by rigid objects.
    */
-  virtual int addArticulatedObjectFromURDF(
-      CORRADE_UNUSED const std::string& filepath,
-      CORRADE_UNUSED DrawableGroup* drawables,
-      CORRADE_UNUSED bool fixedBase = false,
-      CORRADE_UNUSED float globalScale = 1.0,
-      CORRADE_UNUSED float massScale = 1.0,
-      CORRADE_UNUSED bool forceReload = false,
-      CORRADE_UNUSED bool maintainLinkOrder = false,
-      CORRADE_UNUSED const std::string& lightSetup = DEFAULT_LIGHTING_KEY) {
-    ESP_DEBUG() << "Not implemented in base PhysicsManager.";
-    return ID_UNDEFINED;
-  }
+  int addArticulatedObjectFromURDF(
+      const std::string& filepath,
+      DrawableGroup* drawables,
+      bool fixedBase = false,
+      float globalScale = 1.0,
+      float massScale = 1.0,
+      bool forceReload = false,
+      bool maintainLinkOrder = false,
+      bool intertiaFromURDF = false,
+      const std::string& lightSetup = DEFAULT_LIGHTING_KEY);
 
   //! Remove an @ref ArticulatedObject from the world by unique id.
   virtual void removeArticulatedObject(int objectId);
@@ -550,6 +614,26 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
   ArticulatedObject& getArticulatedObject(int objectId) {
     auto existAOIter = getArticulatedObjIteratorOrAssert(objectId);
     return *existAOIter->second;
+  }
+
+  /**
+   * @brief Create an articulated object wrapper appropriate for this physics
+   * manager. Overridden if called by dynamics-library-enabled PhysicsManager
+   */
+  virtual ManagedArticulatedObject::ptr getArticulatedObjectWrapper();
+
+  /** @brief Get a list of existing object IDs for articulated objects (i.e.,
+   * existing keys in @ref PhysicsManager::existingArticulatedObjects_.)
+   *  @return List of object ID keys from @ref
+   * PhysicsManager::existingArticulatedObjects_.
+   */
+  std::vector<int> getExistingArticulatedObjectIds() const {
+    std::vector<int> v;
+    v.reserve(existingArticulatedObjects_.size());
+    for (const auto& bro : existingArticulatedObjects_) {
+      v.push_back(bro.first);
+    }
+    return v;
   }
 
   //============ Simulator functions =============
@@ -640,37 +724,6 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
   virtual void setStageRestitutionCoefficient(
       CORRADE_UNUSED const double restitutionCoefficient) {}
 
-#ifdef ESP_BUILD_WITH_VHACD
-  /** @brief Initializes a new VoxelWrapper with a boundary voxelization using
-   * VHACD's voxelization library and assigns it to a rigid body.
-   * @param  physObjectID The object ID and key identifying the object in @ref
-   * PhysicsManager::existingObjects_.
-   * @param resolution Represents the approximate number of voxels in the new
-   * voxelization.
-   */
-  void generateVoxelization(int physObjectID, int resolution = 1000000);
-
-  /** @brief Initializes a new VoxelWrapper with a boundary voxelization using
-   * VHACD's voxelization library and assigns it to the stage's rigid body.
-   * @param resolution Represents the approximate number of voxels in the new
-   * voxelization.
-   */
-  void generateStageVoxelization(int resolution = 1000000);
-#endif
-
-  /** @brief Gets the VoxelWrapper associated with a rigid object.
-   * @param physObjectID The object ID and key identifying the object in @ref
-   * PhysicsManager::existingObjects_.
-   * @return A pointer to the object's Voxel Wrapper.
-   */
-  std::shared_ptr<esp::geo::VoxelWrapper> getObjectVoxelization(
-      int physObjectID) const;
-
-  /** @brief Gets the VoxelWrapper associated with the scene.
-   * @return A pointer to the scene's Voxel Wrapper.
-   */
-  std::shared_ptr<esp::geo::VoxelWrapper> getStageVoxelization() const;
-
   // =========== Debug functions ===========
 
   /** @brief Get the number of objects in @ref PhysicsManager::existingObjects_
@@ -687,27 +740,6 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    * @param drawBB Set rendering of the bounding box to true or false.
    */
   void setObjectBBDraw(int physObjectID, DrawableGroup* drawables, bool drawBB);
-
-  /** @brief Set the voxelization visualization for the object true or false.
-   * @param physObjectID The object ID and key identifying the object in @ref
-   * PhysicsManager::existingObjects_.
-   * @param gridName The voxel grid to be visualized.
-   * @param drawables The drawables group with which to render the voxelization.
-   * @param drawVoxelization Set rendering of the voxelization to true or false.
-   */
-  void setObjectVoxelizationDraw(int physObjectID,
-                                 const std::string& gridName,
-                                 DrawableGroup* drawables,
-                                 bool drawVoxelization);
-
-  /** @brief Set the voxelization visualization for the scene true or false.
-   * @param gridName The voxel grid to be visualized.
-   * @param drawables The drawables group with which to render the voxelization.
-   * @param drawVoxelization Set rendering of the voxelization to true or false.
-   */
-  void setStageVoxelizationDraw(const std::string& gridName,
-                                DrawableGroup* drawables,
-                                bool drawVoxelization);
 
   /**
    * @brief Get the root node of an object's visual SceneNode subtree.
@@ -762,11 +794,13 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    */
   virtual void performDiscreteCollisionDetection() {
     /*Does nothing in base PhysicsManager.*/
+    ESP_ERROR() << "Not implemented in base PhysicsManager. Install with "
+                   "--bullet to use this feature.";
   }
 
   /**
    * @brief Query the number of contact points that were active during the
-   * collision detection check.
+   * most recent collision detection check.
    *
    * Not implemented for default PhysicsManager.
    * @return the number of active contact points.
@@ -832,11 +866,8 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    *
    * @return The initialization settings for this physics manager
    */
-  metadata::attributes::PhysicsManagerAttributes::ptr
-  getInitializationAttributes() const {
-    return metadata::attributes::PhysicsManagerAttributes::create(
-        *physicsManagerAttributes_.get());
-  }
+  std::shared_ptr<metadata::attributes::PhysicsManagerAttributes>
+  getInitializationAttributes() const;
 
   /**
    * @brief Cast a ray into the collision world and return a @ref
@@ -853,6 +884,8 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    */
   virtual RaycastResults castRay(const esp::geo::Ray& ray,
                                  CORRADE_UNUSED double maxDistance = 100.0) {
+    ESP_ERROR() << "Not implemented in base PhysicsManager. Install with "
+                   "--bullet to use this feature.";
     RaycastResults results;
     results.ray = ray;
     return results;
@@ -908,7 +941,8 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    */
   virtual int createRigidConstraint(
       CORRADE_UNUSED const RigidConstraintSettings& settings) {
-    ESP_ERROR() << "Not implemented in base PhysicsManager.";
+    ESP_ERROR() << "Not implemented in base PhysicsManager. Install with "
+                   "--bullet to use this feature.";
     return ID_UNDEFINED;
   }
 
@@ -923,7 +957,8 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
   virtual void updateRigidConstraint(
       CORRADE_UNUSED int constraintId,
       CORRADE_UNUSED const RigidConstraintSettings& settings) {
-    ESP_ERROR() << "Not implemented in base PhysicsManager.";
+    ESP_ERROR() << "Not implemented in base PhysicsManager. Install with "
+                   "--bullet to use this feature.";
   }
 
   /**
@@ -934,7 +969,8 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    * @param constraintId The id of the constraint to remove.
    */
   virtual void removeRigidConstraint(CORRADE_UNUSED int constraintId) {
-    ESP_ERROR() << "Not implemented in base PhysicsManager.";
+    ESP_ERROR() << "Not implemented in base PhysicsManager. Install with "
+                   "--bullet to use this feature.";
   }
 
   /**
@@ -1089,15 +1125,6 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
     return aObjIter;
   }
 
-  /** @brief Check if a particular mesh can be used as a collision mesh for
-   * a particular physics implemenation. Always True for base @ref
-   * PhysicsManager class, since the mesh has already been successfully
-   * loaded by @ref esp::assets::ResourceManager.
-   * @param meshData The mesh to validate.
-   * @return true if valid, false otherwise.
-   */
-  virtual bool isMeshPrimitiveValid(const assets::CollisionMeshData& meshData);
-
   /** @brief Acquire a new ObjectID by recycling the ID of an object removed
    * with @ref removeObject or by incrementing @ref nextObjectID_. See @ref
    * addObject.
@@ -1144,20 +1171,6 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
       const esp::metadata::attributes::ObjectAttributes::ptr& objectAttributes,
       scene::SceneNode* objectNode);
 
-  /** @brief Set the voxelization visualization for a scene node to be true
-   * or false.
-   * @param gridName The name of the grid to be drawn.
-   * @param rigidBase The rigidBase of the object or scene.
-   * @param drawables The drawables group with which to render the
-   * voxelization.
-   * @param drawVoxelization Set rendering of the voxelization to true or
-   * false.
-   */
-  void setVoxelizationDraw(const std::string& gridName,
-                           RigidBase* rigidBase,
-                           DrawableGroup* drawables,
-                           bool drawVoxelization);
-
   /** @brief A reference to a @ref esp::assets::ResourceManager which holds
    * assets that can be accessed by this @ref PhysicsManager*/
   assets::ResourceManager& resourceManager_;
@@ -1173,7 +1186,7 @@ class PhysicsManager : public std::enable_shared_from_this<PhysicsManager> {
    * esp::metadata::attributes::PhysicsManagerAttributes describing
    * this physics manager
    */
-  const metadata::attributes::PhysicsManagerAttributes::cptr
+  const std::shared_ptr<const metadata::attributes::PhysicsManagerAttributes>
       physicsManagerAttributes_;
 
   /** @brief The current physics library implementation used by this

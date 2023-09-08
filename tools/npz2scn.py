@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 # npz2scn - tool for extracting semantic scene information from 3dscenegraph
 #           dataset (https://3dscenegraph.stanford.edu/)
 
@@ -12,7 +16,7 @@ import numpy as np
 
 # Convert ndarrays to python lists so that we can serialize.
 def listify(entry: Dict[str, Any]) -> None:
-    for key in entry.keys():
+    for key in entry:
         if type(entry[key]) is np.ndarray:
             entry[key] = entry[key].tolist()
 

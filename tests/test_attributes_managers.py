@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 import magnum as mn
 
-import examples.settings
 import habitat_sim
+import habitat_sim.utils.settings
 
 
 def perform_general_tests(attr_mgr, search_string):
@@ -253,10 +257,9 @@ def perform_add_blank_template_test(attr_mgr, valid_render_handle=None):
 
 
 def test_physics_attributes_managers():
-    cfg_settings = examples.settings.default_sim_settings.copy()
+    cfg_settings = habitat_sim.utils.settings.default_sim_settings.copy()
     cfg_settings["scene"] = "data/scene_datasets/habitat-test-scenes/van-gogh-room.glb"
-    cfg_settings["enable_physics"] = True
-    hab_cfg = examples.settings.make_cfg(cfg_settings)
+    hab_cfg = habitat_sim.utils.settings.make_cfg(cfg_settings)
     with habitat_sim.Simulator(hab_cfg) as sim:
         # get attribute managers
         phys_attr_mgr = sim.get_physics_template_manager()
@@ -275,10 +278,9 @@ def test_physics_attributes_managers():
 
 
 def test_stage_attributes_managers():
-    cfg_settings = examples.settings.default_sim_settings.copy()
+    cfg_settings = habitat_sim.utils.settings.default_sim_settings.copy()
     cfg_settings["scene"] = "data/scene_datasets/habitat-test-scenes/van-gogh-room.glb"
-    cfg_settings["enable_physics"] = True
-    hab_cfg = examples.settings.make_cfg(cfg_settings)
+    hab_cfg = habitat_sim.utils.settings.make_cfg(cfg_settings)
     with habitat_sim.Simulator(hab_cfg) as sim:
         stage_name = cfg_settings["scene"]
 
@@ -296,10 +298,9 @@ def test_stage_attributes_managers():
 
 
 def test_object_attributes_managers():
-    cfg_settings = examples.settings.default_sim_settings.copy()
+    cfg_settings = habitat_sim.utils.settings.default_sim_settings.copy()
     cfg_settings["scene"] = "data/scene_datasets/habitat-test-scenes/van-gogh-room.glb"
-    cfg_settings["enable_physics"] = True
-    hab_cfg = examples.settings.make_cfg(cfg_settings)
+    hab_cfg = habitat_sim.utils.settings.make_cfg(cfg_settings)
     with habitat_sim.Simulator(hab_cfg) as sim:
         # get object attribute managers
         obj_mgr = sim.get_object_template_manager()
@@ -370,10 +371,9 @@ def perform_asset_attrib_mgr_tests(attr_mgr, default_attribs, legalVal, illegalV
 
 
 def test_asset_attributes_managers():
-    cfg_settings = examples.settings.default_sim_settings.copy()
+    cfg_settings = habitat_sim.utils.settings.default_sim_settings.copy()
     cfg_settings["scene"] = "data/scene_datasets/habitat-test-scenes/van-gogh-room.glb"
-    cfg_settings["enable_physics"] = True
-    hab_cfg = examples.settings.make_cfg(cfg_settings)
+    hab_cfg = habitat_sim.utils.settings.make_cfg(cfg_settings)
     with habitat_sim.Simulator(hab_cfg) as sim:
         # legal and illegal vals for primitives based on wireframe or solid
         legal_mod_val_wf = 64

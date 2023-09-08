@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -57,7 +57,8 @@ class BulletPhysicsManager : public PhysicsManager {
    */
   explicit BulletPhysicsManager(
       assets::ResourceManager& _resourceManager,
-      const metadata::attributes::PhysicsManagerAttributes::cptr&
+      const std::shared_ptr<
+          const metadata::attributes::PhysicsManagerAttributes>&
           _physicsManagerAttributes);
 
   /** @brief Destructor which destructs necessary Bullet physics structures.*/
@@ -67,74 +68,37 @@ class BulletPhysicsManager : public PhysicsManager {
 
   /**
    * @brief Load, parse, and import a URDF file instantiating an @ref
-   * BulletArticulatedObject in the world.  This version does not require
-   * drawables to be specified.
-   * @param filepath The fully-qualified filename for the URDF file describing
-   * the model the articulated object is to be built from.
-   * @param fixedBase Whether the base of the @ref ArticulatedObject should be
-   * fixed.
-   * @param globalScale A scale multiplier to be applied uniformly in 3
-   * dimensions to the entire @ref ArticulatedObject.
-   * @param massScale A scale multiplier to be applied to the mass of the all
-   * the components of the @ref ArticulatedObject.
-   * @param forceReload If true, reload the source URDF from file, replacing the
-   * cached model.
-   * @param maintainLinkOrder If true, maintain the order of link definitions
-   * from the URDF file as the link indices.
-   * @param lightSetup The string name of the desired lighting setup to use.
+   * ArticulatedObject in the world based on the urdf filepath specified in @ref
+   * esp::metadata::attributes::ArticulatedObjectAttributes. This version
+   * requires drawables to be provided.
    *
-   * @return A unique id for the @ref ArticulatedObject, allocated from the same
-   * id set as rigid objects.
-   */
-  int addArticulatedObjectFromURDF(
-      const std::string& filepath,
-      bool fixedBase = false,
-      float globalScale = 1.0,
-      float massScale = 1.0,
-      bool forceReload = false,
-      bool maintainLinkOrder = false,
-      const std::string& lightSetup = DEFAULT_LIGHTING_KEY) override;
-
-  /**
-   * @brief Load, parse, and import a URDF file instantiating an @ref
-   * BulletArticulatedObject in the world.
-   * @param filepath The fully-qualified filename for the URDF file describing
-   * the model the articulated object is to be built from.
+   * @param artObjAttributes The @ref ArticulatedObject's template to use to create it.
    * @param drawables Reference to the scene graph drawables group to enable
    * rendering of the newly initialized @ref ArticulatedObject.
-   * @param fixedBase Whether the base of the @ref ArticulatedObject should be
-   * fixed.
-   * @param globalScale A scale multiplier to be applied uniformly in 3
-   * dimensions to the entire @ref ArticulatedObject.
-   * @param massScale A scale multiplier to be applied to the mass of the all
-   * the components of the @ref ArticulatedObject.
-   * @param forceReload If true, reload the source URDF from file, replacing the
-   * cached model.
-   * @param maintainLinkOrder If true, maintain the order of link definitions
-   * from the URDF file as the link indices.
+   * @param forceReload If true, force the reload of the source URDF from file,
+   * replacing the cached model if it exists.
    * @param lightSetup The string name of the desired lighting setup to use.
    *
-   * @return A unique id for the @ref ArticulatedObject, allocated from the same
-   * id set as rigid objects.
+   * @return The instanced @ref ArticulatedObject 's ID, mapping to the articulated
+   * object in @ref PhysicsManager::existingObjects_ if successful, or
+   * @ref esp::ID_UNDEFINED. These values come from the same pool used
+   * by rigid objects.
    */
-  int addArticulatedObjectFromURDF(
-      const std::string& filepath,
+  int addArticulatedObject(
+      const esp::metadata::attributes::ArticulatedObjectAttributes::ptr&
+          artObjAttributes,
       DrawableGroup* drawables,
-      bool fixedBase = false,
-      float globalScale = 1.0,
-      float massScale = 1.0,
       bool forceReload = false,
-      bool maintainLinkOrder = false,
       const std::string& lightSetup = DEFAULT_LIGHTING_KEY) override;
 
   /**
-   * @brief Use the metadata stored in io::URDF::Link to instance all visual
-   * shapes for a link into the SceneGraph.
+   * @brief Use the metadata stored in metadata::URDF::Link to instance all
+   * visual shapes for a link into the SceneGraph.
    *
    * @param linkObject The Habitat-side ArticulatedLink to which visual shapes
    * will be attached.
-   * @param link The io::URDF::Model's link with visual shape and transform
-   * metadata.
+   * @param link The metadata::URDF::Model's link with visual shape and
+   * transform metadata.
    * @param drawables The SceneGraph's DrawableGroup with which the visual
    * shapes will be rendered.
    * @param lightSetup The string name of the desired lighting setup to use.
@@ -142,9 +106,10 @@ class BulletPhysicsManager : public PhysicsManager {
    * @return Whether or not the render shape instancing was successful.
    */
   bool attachLinkGeometry(ArticulatedLink* linkObject,
-                          const std::shared_ptr<io::URDF::Link>& link,
+                          const std::shared_ptr<metadata::URDF::Link>& link,
                           gfx::DrawableGroup* drawables,
-                          const std::string& lightSetup);
+                          const std::string& lightSetup,
+                          int semanticId);
 
   /**
    * @brief Override of @ref PhysicsManager::removeObject to also remove any
@@ -208,7 +173,7 @@ class BulletPhysicsManager : public PhysicsManager {
 
   /** @brief Get the current coefficient of restitution for the stage
    * collision geometry. This determines the ratio of initial to final relative
-   * velocity between the stage and collidiing object. See @ref
+   * velocity between the stage and colliding object. See @ref
    * staticStageObject_ and BulletRigidObject::getRestitutionCoefficient.
    * @return The scalar coefficient of restitution for the stage geometry.
    */
@@ -430,15 +395,6 @@ class BulletPhysicsManager : public PhysicsManager {
   int recentNumSubStepsTaken_ = -1;
 
  private:
-  /** @brief Check if a particular mesh can be used as a collision mesh for
-   * Bullet.
-   * @param meshData The mesh to validate. Only a triangle mesh is valid. Checks
-   * that the only #ref Magnum::MeshPrimitive are @ref
-   * Magnum::MeshPrimitive::Triangles.
-   * @return true if valid, false otherwise.
-   */
-  bool isMeshPrimitiveValid(const assets::CollisionMeshData& meshData) override;
-
   /**
    * @brief Helper function for getting object and link unique ids from
    * btCollisionObject cache

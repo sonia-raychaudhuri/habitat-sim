@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -30,12 +30,12 @@ namespace esp {
 namespace assets {
 
 SceneLoader::SceneLoader()
-    :
 #ifdef MAGNUM_BUILD_STATIC
-      // avoid using plugins that might depend on different library versions
+    :  // avoid using plugins that might depend on different library versions
       importerManager_("nonexistent")
 #endif
-          {};
+{
+}
 
 MeshData SceneLoader::load(const AssetInfo& info) {
   MeshData mesh;

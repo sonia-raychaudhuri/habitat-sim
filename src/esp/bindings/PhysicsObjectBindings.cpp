@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -265,6 +265,25 @@ void declareRigidBaseWrapper(py::module& m,
                      "'s scalar coefficient of friction. Only applies to "
                      "MotionType::DYNAMIC objects.")
                         .c_str())
+      .def_property(
+          "rolling_friction_coefficient",
+          &RigidBaseWrapper::getRollingFrictionCoefficient,
+          &RigidBaseWrapper::setRollingFrictionCoefficient,
+          ("Get or set this " + objType +
+           "'s scalar rolling coefficient of friction. Damps angular velocity "
+           "about axis orthogonal to the contact normal to prevent rounded "
+           "shapes from rolling forever. Only applies to "
+           "MotionType::DYNAMIC objects.")
+              .c_str())
+      .def_property(
+          "spinning_friction_coefficient",
+          &RigidBaseWrapper::getSpinningFrictionCoefficient,
+          &RigidBaseWrapper::setSpinningFrictionCoefficient,
+          ("Get or set this " + objType +
+           "'s scalar spinning coefficient of friction. Damps angular velocity "
+           "about the contact normal. Only applies to "
+           "MotionType::DYNAMIC objects.")
+              .c_str())
       .def_property(
           "intertia_diagonal", &RigidBaseWrapper::getInertiaVector,
           &RigidBaseWrapper::setInertiaVector,

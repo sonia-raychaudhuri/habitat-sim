@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -193,7 +193,8 @@ class AssetAttributesManager
       bool contains = true) const {
     if (primType == PrimObjTypes::END_PRIM_OBJ_TYPES) {
       ESP_ERROR() << "Illegal primtitive type "
-                     "name PrimObjTypes::END_PRIM_OBJ_TYPES. Aborting.";
+                     "name PrimObjTypes::END_PRIM_OBJ_TYPES, so no template "
+                     "handles exist to retrieve.";
       return {};
     }
     std::string subStr = PrimitiveNames3DMap.at(primType);
@@ -414,21 +415,21 @@ class AssetAttributesManager
       override {
     ESP_WARNING()
         << "Overriding default objects for PrimitiveAssetAttributes not "
-           "currently supported.  Aborting.";
+           "currently supported so default is set to nullptr.";
     this->defaultObj_ = nullptr;
   }  // AssetAttributesManager::setDefaultObject
 
- protected:
   /**
    * @brief Check if currently configured primitive asset template library has
    * passed handle.
    * @param handle String name of primitive asset attributes desired
    * @return whether handle exists or not in asset attributes library
    */
-  bool isValidPrimitiveAttributes(const std::string& handle) override {
+  bool isValidPrimitiveAttributes(const std::string& handle) const {
     return this->getObjectLibHasHandle(handle);
   }
 
+ protected:
   /**
    * @brief This method will perform any necessary updating that is
    * attributesManager-specific upon template removal, such as removing a
@@ -495,7 +496,8 @@ class AssetAttributesManager
     auto primTypeCtorIter = primTypeConstructorMap_.find(primClassName);
     if (primTypeCtorIter == primTypeConstructorMap_.end()) {
       ESP_ERROR() << "No primitive class" << primClassName
-                  << "exists in Magnum::Primitives. Aborting.";
+                  << "exists in Magnum::Primitives, so unable to initialize "
+                     "new Primitive object.";
       return nullptr;
     }
     // these attributes ignore any default setttings.
@@ -513,7 +515,8 @@ class AssetAttributesManager
     if (primitiveType == PrimObjTypes::END_PRIM_OBJ_TYPES) {
       ESP_ERROR() << "Cannot instantiate "
                      "attributes::AbstractPrimitiveAttributes object for "
-                     "PrimObjTypes::END_PRIM_OBJ_TYPES. Aborting.";
+                     "PrimObjTypes::END_PRIM_OBJ_TYPES, so create Primitive "
+                     "Attributes failed.";
       return nullptr;
     }
     int idx = static_cast<int>(primitiveType);

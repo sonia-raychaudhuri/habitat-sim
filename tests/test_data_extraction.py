@@ -1,3 +1,4 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -11,10 +12,10 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
 import habitat_sim
-from examples.settings import make_cfg
 from habitat_sim.utils.data.data_extractor import ImageExtractor
 from habitat_sim.utils.data.data_structures import ExtractorLRUCache
 from habitat_sim.utils.data.pose_extractor import TopdownView
+from habitat_sim.utils.settings import make_cfg
 
 
 class TrivialNet(nn.Module):

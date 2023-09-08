@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -9,8 +9,6 @@
 #include <Magnum/Math/Intersection.h>
 #include <Magnum/Math/Range.h>
 #include <Magnum/SceneGraph/Drawable.h>
-#include "esp/gfx/Drawable.h"
-#include "esp/gfx/DrawableGroup.h"
 #include "esp/scene/SceneGraph.h"
 
 namespace Mn = Magnum;
@@ -25,7 +23,7 @@ namespace gfx {
  * @param frustum, the frustum
  * @param frustumPlaneIndex, the frustum plane in last frame that culled the
  * aabb (default: 0)
- * @return NullOpt if aabb intersects the frustum, otherwise the fustum plane
+ * @return NullOpt if aabb intersects the frustum, otherwise the frustum plane
  * that culls the aabb
  */
 Cr::Containers::Optional<int> rangeFrustum(const Mn::Range3D& range,
@@ -42,7 +40,7 @@ Cr::Containers::Optional<int> rangeFrustum(const Mn::Range3D& range,
 
     const float d = Mn::Math::dot(center, plane.xyz());
     const float r = Mn::Math::dot(extent, absPlaneNormal);
-    if (d + r < -2.0 * plane.w())
+    if (d + r < -2.0f * plane.w())
       return Cr::Containers::Optional<int>{index};
   }
 
@@ -197,7 +195,8 @@ size_t RenderCamera::filterTransforms(DrawableTransforms& drawableTransforms,
   return drawableTransforms.size();
 }
 
-esp::geo::Ray RenderCamera::unproject(const Mn::Vector2i& viewportPosition) {
+esp::geo::Ray RenderCamera::unproject(const Mn::Vector2i& viewportPosition,
+                                      bool normalized) {
   esp::geo::Ray ray;
   ray.origin = object().absoluteTranslation();
 
@@ -209,11 +208,19 @@ esp::geo::Ray RenderCamera::unproject(const Mn::Vector2i& viewportPosition) {
           Magnum::Vector2{1.0f},
       1.0};
 
+  // compute the far plane distance
+  auto farDistance =
+      projectionMatrix()[3][2] / (1.0f + projectionMatrix()[2][2]);
+
   ray.direction =
-      ((object().absoluteTransformationMatrix() * projectionMatrix().inverted())
+      ((object().absoluteTransformationMatrix() * invertedProjectionMatrix)
            .transformPoint(normalizedPos) -
-       ray.origin)
-          .normalized();
+       ray.origin) /
+      farDistance;
+
+  if (normalized) {
+    ray.direction = ray.direction.normalized();
+  }
   return ray;
 }
 

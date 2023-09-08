@@ -1,12 +1,12 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 #ifndef ESP_SCENE_SCENEGRAPH_H
 #define ESP_SCENE_SCENEGRAPH_H
 
+#include <Magnum/SceneGraph/Scene.h>
 #include <unordered_map>
-
 #include "esp/core/Esp.h"
 #include "esp/gfx/magnum.h"
 
@@ -112,9 +112,9 @@ class SceneGraph {
 
   // ==== Drawables ====
   // for each scene node in a scene graph,
-  // we create a drawable object (e.g., PTexMeshDrawable, InstanceMeshDrawable,
-  // etc.) and add it to the drawable group of that scene. This is done on the
-  // fly when we build the scene graph
+  // we create a drawable object (e.g., InstanceMeshDrawable, etc.) and add it
+  // to the drawable group of that scene. This is done on the fly when we build
+  // the scene graph
 
   // drawable groups for this scene graph
   // This is a mapping from (groupID -> group of drawables).

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
 import time
 from collections import OrderedDict
 from collections.abc import MutableMapping
-from os import path as osp
 from typing import Any, Dict, List
 from typing import MutableMapping as MutableMapping_T
 from typing import Optional, Union, cast, overload
@@ -31,7 +30,7 @@ from habitat_sim.agent.agent import Agent, AgentConfiguration, AgentState
 from habitat_sim.bindings import cuda_enabled
 from habitat_sim.logging import LoggingContext, logger
 from habitat_sim.metadata import MetadataMediator
-from habitat_sim.nav import GreedyGeodesicFollower, NavMeshSettings
+from habitat_sim.nav import GreedyGeodesicFollower
 from habitat_sim.sensor import SensorSpec, SensorType
 from habitat_sim.sensors.noise_models import make_sensor_noise_model
 from habitat_sim.sim import SimulatorBackend, SimulatorConfiguration
@@ -57,6 +56,7 @@ class Configuration:
     agents: List[AgentConfiguration]
     # An existing Metadata Mediator can also be used to construct a SimulatorBackend
     metadata_mediator: Optional[MetadataMediator] = None
+    enable_batch_renderer: bool = False
 
 
 @attr.s(auto_attribs=True)
@@ -89,8 +89,8 @@ class Simulator(SimulatorBackend):
                 "Config has not agents specified.  Must specify at least 1 agent"
             )
 
-        config.sim_cfg.create_renderer = any(
-            (len(cfg.sensor_specifications) > 0 for cfg in config.agents)
+        config.sim_cfg.create_renderer = not config.enable_batch_renderer and any(
+            len(cfg.sensor_specifications) > 0 for cfg in config.agents
         )
         config.sim_cfg.load_semantic_mesh |= any(
             (
@@ -124,8 +124,8 @@ class Simulator(SimulatorBackend):
             destroyed if async rendering was used.  If async rendering wasn't used,
             this has no effect.
         """
-        # NB: Python still still call __del__ (and thus)
-        # close even if __init__ errors. We don't
+        # NB: Python still calls __del__ (and thus)
+        # closes even if __init__ fails. We don't
         # have anything to close if we aren't initialized so
         # we can just return.
         if not self._initialized:
@@ -209,53 +209,11 @@ class Simulator(SimulatorBackend):
         ]
 
     def _config_pathfinder(self, config: Configuration) -> None:
-        scene_basename = osp.basename(config.sim_cfg.scene_id)
-        # "mesh.ply" is identified as a replica model, whose navmesh
-        # is named as "mesh_semantic.navmesh" and is placed in the
-        # subfolder called "habitat" (a level deeper than the "mesh.ply")
-        if scene_basename == "mesh.ply":
-            scene_dir = osp.dirname(config.sim_cfg.scene_id)
-            navmesh_filenname = osp.join(scene_dir, "habitat", "mesh_semantic.navmesh")
-        else:
-            navmesh_filenname = osp.splitext(config.sim_cfg.scene_id)[0] + ".navmesh"
-
-        if osp.exists(navmesh_filenname) and not self.pathfinder.is_loaded:
-            self.pathfinder.load_nav_mesh(navmesh_filenname)
-            logger.info(f"Loaded navmesh {navmesh_filenname}")
-
-        # NOTE: this recomputed NavMesh does not include STATIC objects.
-        needed_settings = NavMeshSettings()
-        default_agent_config = config.agents[config.sim_cfg.default_agent_id]
-        needed_settings.agent_radius = default_agent_config.radius
-        needed_settings.agent_height = default_agent_config.height
-        if (
-            # If we loaded a navmesh and we need one with different settings,
-            # always try and recompute
-            (
-                self.pathfinder.is_loaded
-                and self.pathfinder.nav_mesh_settings != needed_settings
-            )
-            # If we didn't load a navmesh, only try to recompute one if we can.
-            # This allows for use cases where we just want to view a single
-            # object or similar.
-            or (
-                not self.pathfinder.is_loaded
-                and config.sim_cfg.scene_id.lower() != "none"
-                and config.sim_cfg.create_renderer
-            )
-        ):
-            logger.info(
-                f"Recomputing navmesh for agent's height {default_agent_config.height} and radius"
-                f" {default_agent_config.radius}."
-            )
-            self.recompute_navmesh(self.pathfinder, needed_settings)
-
         self.pathfinder.seed(config.sim_cfg.random_seed)
 
-        if not self.pathfinder.is_loaded:
+        if self.pathfinder is None or not self.pathfinder.is_loaded:
             logger.warning(
-                "Could not find a navmesh nor could one be computed, "
-                "no collision checking will be done"
+                "Navmesh not loaded or computed, no collision checking will be done."
             )
 
     def reconfigure(self, config: Configuration) -> None:
@@ -341,6 +299,8 @@ class Simulator(SimulatorBackend):
     def start_async_render_and_step_physics(
         self, dt: float, agent_ids: Union[int, List[int]] = 0
     ):
+        assert not self.config.enable_batch_renderer
+
         if self._async_draw_agent_ids is not None:
             raise RuntimeError(
                 "start_async_render_and_step_physics was already called.  "
@@ -354,13 +314,15 @@ class Simulator(SimulatorBackend):
 
         for agent_id in agent_ids:
             agent_sensorsuite = self.__sensors[agent_id]
-            for _sensor_uuid, sensor in agent_sensorsuite.items():
+            for sensor in agent_sensorsuite.values():
                 sensor._draw_observation_async()
 
         self.renderer.start_draw_jobs()
         self.step_physics(dt)
 
     def start_async_render(self, agent_ids: Union[int, List[int]] = 0):
+        assert not self.config.enable_batch_renderer
+
         if self._async_draw_agent_ids is not None:
             raise RuntimeError(
                 "start_async_render_and_step_physics was already called.  "
@@ -374,7 +336,7 @@ class Simulator(SimulatorBackend):
 
         for agent_id in agent_ids:
             agent_sensorsuite = self.__sensors[agent_id]
-            for _sensor_uuid, sensor in agent_sensorsuite.items():
+            for sensor in agent_sensorsuite.values():
                 sensor._draw_observation_async()
 
         self.renderer.start_draw_jobs()
@@ -385,6 +347,8 @@ class Simulator(SimulatorBackend):
         Dict[str, Union[ndarray, "Tensor"]],
         Dict[int, Dict[str, Union[ndarray, "Tensor"]]],
     ]:
+        assert not self.config.enable_batch_renderer
+
         if self._async_draw_agent_ids is None:
             raise RuntimeError(
                 "get_sensor_observations_async_finish was called before calling start_async_render_and_step_physics."
@@ -430,18 +394,27 @@ class Simulator(SimulatorBackend):
         else:
             return_single = False
 
-        for agent_id in agent_ids:
-            agent_sensorsuite = self.__sensors[agent_id]
-            for _sensor_uuid, sensor in agent_sensorsuite.items():
-                sensor.draw_observation()
-
-        # As backport. All Dicts are ordered in Python >= 3.7
+        # As backport. All Dicts are ordered in Python >= 3.7.
         observations: Dict[int, ObservationDict] = OrderedDict()
+
+        # Draw observations (for classic non-batched renderer).
+        if not self.config.enable_batch_renderer:
+            for agent_id in agent_ids:
+                agent_sensorsuite = self.__sensors[agent_id]
+                for _sensor_uuid, sensor in agent_sensorsuite.items():
+                    sensor.draw_observation()
+        else:
+            # The batch renderer draws observations from external code.
+            # Sensors are only used as data containers.
+            pass
+
+        # Get observations.
         for agent_id in agent_ids:
             agent_observations: ObservationDict = {}
             for sensor_uuid, sensor in self.__sensors[agent_id].items():
                 agent_observations[sensor_uuid] = sensor.get_observation()
             observations[agent_id] = agent_observations
+
         if return_single:
             return next(iter(observations.values()))
         return observations
@@ -513,7 +486,7 @@ class Simulator(SimulatorBackend):
     def make_greedy_follower(
         self,
         agent_id: Optional[int] = None,
-        goal_radius: float = None,
+        goal_radius: Optional[float] = None,
         *,
         stop_key: Optional[Any] = None,
         forward_key: Optional[Any] = None,
@@ -554,7 +527,7 @@ class Simulator(SimulatorBackend):
     def __del__(self) -> None:
         self.close(destroy=True)
 
-    def step_physics(self, dt: float, scene_id: int = 0) -> None:
+    def step_physics(self, dt: float) -> None:
         self.step_world(dt)
 
 
@@ -575,6 +548,14 @@ class Sensor:
 
         self._spec = self._sensor_object.specification()
 
+        # When using the batch renderer, no memory is allocated here.
+        if not self._sim.config.enable_batch_renderer:
+            self._initialize_sensor()
+
+    def _initialize_sensor(self):
+        r"""
+        Allocate buffers and initialize noise model in preparation for rendering.
+        """
         if self._spec.sensor_type == SensorType.AUDIO:
             return
 
@@ -645,84 +626,94 @@ class Sensor:
         )
 
     def draw_observation(self) -> None:
+        # Batch rendering happens elsewhere.
+        assert not self._sim.config.enable_batch_renderer
+
         if self._spec.sensor_type == SensorType.AUDIO:
             # do nothing in draw observation, get_observation will be called after this
             # run the simulation there
             return
-        else:
-            assert self._sim.renderer is not None
-            # see if the sensor is attached to a scene graph, otherwise it is invalid,
-            # and cannot make any observation
-            if not self._sensor_object.object:
-                raise habitat_sim.errors.InvalidAttachedObject(
-                    "Sensor observation requested but sensor is invalid.\
+
+        assert self._sim.renderer is not None
+        # see if the sensor is attached to a scene graph, otherwise it is invalid,
+        # and cannot make any observation
+        if not self._sensor_object.object:
+            raise habitat_sim.errors.InvalidAttachedObject(
+                "Sensor observation requested but sensor is invalid.\
                     (has it been detached from a scene node?)"
-                )
-            self._sim.renderer.draw(self._sensor_object, self._sim)
+            )
+        self._sim.renderer.draw(self._sensor_object, self._sim)
 
     def _draw_observation_async(self) -> None:
+        # Batch rendering happens elsewhere.
+        assert not self._sim.config.enable_batch_renderer
+
         if self._spec.sensor_type == SensorType.AUDIO:
             # do nothing in draw observation, get_observation will be called after this
             # run the simulation there
             return
-        else:
-            assert self._sim.renderer is not None
-            if (
-                self._spec.sensor_type == SensorType.SEMANTIC
-                and self._sim.get_active_scene_graph()
-                is not self._sim.get_active_semantic_scene_graph()
-            ):
-                raise RuntimeError(
-                    "Async drawing doesn't support semantic rendering when there are multiple scene graphs"
-                )
-            # TODO: sync this path with renderer changes as above (render from sensor object)
 
-            # see if the sensor is attached to a scene graph, otherwise it is invalid,
-            # and cannot make any observation
-            if not self._sensor_object.object:
-                raise habitat_sim.errors.InvalidAttachedObject(
-                    "Sensor observation requested but sensor is invalid.\
-                    (has it been detached from a scene node?)"
-                )
-
-            # get the correct scene graph based on application
-            if self._spec.sensor_type == SensorType.SEMANTIC:
-                if self._sim.semantic_scene is None:
-                    raise RuntimeError(
-                        "SemanticSensor observation requested but no SemanticScene is loaded"
-                    )
-                scene = self._sim.get_active_semantic_scene_graph()
-            else:  # SensorType is DEPTH or any other type
-                scene = self._sim.get_active_scene_graph()
-
-            # now, connect the agent to the root node of the current scene graph
-
-            # sanity check is not needed on agent:
-            # because if a sensor is attached to a scene graph,
-            # it implies the agent is attached to the same scene graph
-            # (it assumes backend simulator will guarantee it.)
-
-            agent_node = self._agent.scene_node
-            agent_node.parent = scene.get_root_node()
-
-            # get the correct scene graph based on application
-            if self._spec.sensor_type == SensorType.SEMANTIC:
-                scene = self._sim.get_active_semantic_scene_graph()
-            else:  # SensorType is DEPTH or any other type
-                scene = self._sim.get_active_scene_graph()
-
-            render_flags = habitat_sim.gfx.Camera.Flags.NONE
-
-            if self._sim.frustum_culling:
-                render_flags |= habitat_sim.gfx.Camera.Flags.FRUSTUM_CULLING
-
-            self._sim.renderer.enqueue_async_draw_job(
-                self._sensor_object, scene, self.view, render_flags
+        assert self._sim.renderer is not None
+        if (
+            self._spec.sensor_type == SensorType.SEMANTIC
+            and self._sim.get_active_scene_graph()
+            is not self._sim.get_active_semantic_scene_graph()
+        ):
+            raise RuntimeError(
+                "Async drawing doesn't support semantic rendering when there are multiple scene graphs"
             )
+        # TODO: sync this path with renderer changes as above (render from sensor object)
+
+        # see if the sensor is attached to a scene graph, otherwise it is invalid,
+        # and cannot make any observation
+        if not self._sensor_object.object:
+            raise habitat_sim.errors.InvalidAttachedObject(
+                "Sensor observation requested but sensor is invalid.\
+                (has it been detached from a scene node?)"
+            )
+
+        # get the correct scene graph based on application
+        if self._spec.sensor_type == SensorType.SEMANTIC:
+            if self._sim.semantic_scene is None:
+                raise RuntimeError(
+                    "SemanticSensor observation requested but no SemanticScene is loaded"
+                )
+            scene = self._sim.get_active_semantic_scene_graph()
+        else:  # SensorType is DEPTH or any other type
+            scene = self._sim.get_active_scene_graph()
+
+        # now, connect the agent to the root node of the current scene graph
+
+        # sanity check is not needed on agent:
+        # because if a sensor is attached to a scene graph,
+        # it implies the agent is attached to the same scene graph
+        # (it assumes backend simulator will guarantee it.)
+
+        agent_node = self._agent.scene_node
+        agent_node.parent = scene.get_root_node()
+
+        # get the correct scene graph based on application
+        if self._spec.sensor_type == SensorType.SEMANTIC:
+            scene = self._sim.get_active_semantic_scene_graph()
+        else:  # SensorType is DEPTH or any other type
+            scene = self._sim.get_active_scene_graph()
+
+        render_flags = habitat_sim.gfx.Camera.Flags.NONE
+
+        if self._sim.frustum_culling:
+            render_flags |= habitat_sim.gfx.Camera.Flags.FRUSTUM_CULLING
+
+        self._sim.renderer.enqueue_async_draw_job(
+            self._sensor_object, scene, self.view, render_flags
+        )
 
     def get_observation(self) -> Union[ndarray, "Tensor"]:
         if self._spec.sensor_type == SensorType.AUDIO:
             return self._get_audio_observation()
+
+        # Placeholder until batch renderer emplaces the final value.
+        if self._sim.config.enable_batch_renderer:
+            return None
 
         assert self._sim.renderer is not None
         tgt = self._sensor_object.render_target
@@ -752,7 +743,6 @@ class Sensor:
     def _get_observation_async(self) -> Union[ndarray, "Tensor"]:
         if self._spec.sensor_type == SensorType.AUDIO:
             return self._get_audio_observation()
-
         if self._spec.gpu2gpu_transfer:
             obs = self._buffer.flip(0)  # type: ignore[union-attr]
         else:

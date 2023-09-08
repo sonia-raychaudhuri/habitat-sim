@@ -1,3 +1,7 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 import collections
 import math
 import random
@@ -102,7 +106,7 @@ class InstanceVisualizer:
                     target["image_id"].item(): images[i]
                     for i, target in enumerate(targets)
                 }
-                for image_id in res.keys():
+                for image_id in res:
                     masks = res[image_id]["masks"].numpy() >= 0.5
                     labels = res[image_id]["labels"].numpy()
                     visual = visual_filter(masks, labels, segment_type)

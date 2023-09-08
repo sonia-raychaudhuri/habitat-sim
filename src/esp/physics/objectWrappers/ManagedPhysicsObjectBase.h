@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -316,7 +316,7 @@ class AbstractManagedPhysicsObject
     std::shared_ptr<T> sp = weakObjRef_.lock();
     if (!sp) {
       // TODO: Verify object is removed from manager here?
-      ESP_WARNING()
+      ESP_ERROR()
           << "This object no longer exists.  Please delete any variable "
              "references.";
     }

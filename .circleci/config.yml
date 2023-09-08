@@ -17,6 +17,7 @@ commands:
           # OpenEXR requires CMake 3.12. We also download CMake 3.20, which
           # we'll use later for the JS build only.
           command: |
+              echo $(date +%F) > ./date
               echo $(git ls-remote https://github.com/facebookresearch/habitat-lab.git HEAD | awk '{ print $1}') > ./hablab_sha
               cat ./hablab_sha
               wget https://cmake.org/files/v3.12/cmake-3.12.4-Linux-x86_64.sh
@@ -107,7 +108,7 @@ commands:
               if command -v nvidia-smi; then nvidia-smi; fi
       - restore_cache:
           keys:
-            - conda-{{ checksum "habitat-sim/.circleci/config.yml" }}
+            - conda-{{ checksum "habitat-sim/.circleci/config.yml" }}-{{ checksum "./date" }}
       - run: &install_conda
           name: Install conda and dependencies
           no_output_timeout: 20m
@@ -116,17 +117,25 @@ commands:
               then
                 curl -o ~/miniconda.sh -O  https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
                 chmod +x ~/miniconda.sh
-                ~/miniconda.sh -b -p $HOME/miniconda
+                bash ~/miniconda.sh -b -p $HOME/miniconda
                 rm ~/miniconda.sh
                 export PATH=$HOME/miniconda/bin:$PATH
-                conda create -y -n habitat python=3.7
+                conda create -y -n habitat python=3.9
                 . activate habitat
                 # For whatever reason we have to install pytorch first. If it isn't
                 # it installs the 1.4 cpuonly version. Which is no good.
-                conda install -q -y pytorch torchvision cudatoolkit=11.3 -c pytorch
-                conda install -q -y -c conda-forge ninja numpy pytest pytest-cov ccache hypothesis
-                pip install pytest-sugar pytest-xdist pytest-benchmark opencv-python
+                conda install -y pytorch==1.12.1=py3.9_cuda11.3_cudnn8.3.2_0 torchvision==0.13.1=py39_cu113 cudatoolkit=11.3 -c pytorch -c nvidia
+                conda install -y -c conda-forge ninja numpy pytest pytest-cov ccache hypothesis pytest-mock
+                pip install pytest-sugar pytest-xdist pytest-benchmark opencv-python cython mock
               fi
+      - run: &validate_pytorch_installation
+          name: Validate Pytorch Installation
+          no_output_timeout: 5m
+          command: |
+              # Check that pytorch is installed with CUDA.
+              export PATH=$HOME/miniconda/bin:$PATH
+              . activate habitat;
+              python -c 'import torch; torch.cuda.set_device(0)'
       - run:
           name: Install emscripten
           no_output_timeout: 20m
@@ -156,9 +165,9 @@ commands:
                 npm install
                 touch ~/npm_deps_installed
               fi
-      - restore_cache:
-          keys:
-            - habitat-lab-{{ checksum "./hablab_sha" }}
+      #- restore_cache:
+      #    keys:
+      #      - habitat-lab-{{ checksum "./hablab_sha" }}
       - restore_cache: &ccache_cache
           keys:
             - ccache-{{ arch }}-{{ .Branch }}-{{ .BuildNum }}
@@ -178,30 +187,23 @@ commands:
 jobs:
   python_lint:
     docker:
-      - image: cimg/python:3.7
+      - image: cimg/python:3.9.16
     steps:
       - checkout
       - run:
           name: setup
           command: |
-              # Updated llvm to v 10
-              sudo apt-get update
-              sudo apt-get install llvm-10
-              cd /usr/bin
-              sudo rm  llvm-config
-              sudo ln -s llvm-config-10 llvm-config
-              cd ~/project/
               pip install -U pip
               pip install -U --prefer-binary \
-                black \
+                black==23.1.0 \
                 flake8 \
-                flake8-bugbear \
+                flake8-bugbear==22.6.22 \
                 flake8-builtins \
                 flake8-comprehensions \
                 flake8-return \
                 flake8-simplify \
                 hypothesis==6.29.3 \
-                isort \
+                isort==5.12.0 \
                 mypy \
                 numpy \
                 pytest \
@@ -245,7 +247,7 @@ jobs:
 
   pre-commit:
     docker:
-      - image: cimg/python:3.7
+      - image: cimg/python:3.9.16
     working_directory: ~/repo/
 
     steps:
@@ -253,11 +255,12 @@ jobs:
       - run:
           name: Combine precommit config and python versions for caching
           command: |
+            echo $(date +%F) > ./date
             cat .pre-commit-config.yaml > pre-commit-deps.txt
             python -VV >> pre-commit-deps.txt
       - restore_cache:
           keys:
-          - v1-precommit-deps-{{ checksum "pre-commit-deps.txt" }}
+          - v1-precommit-deps-{{ checksum "pre-commit-deps.txt" }}-{{ checksum "./date" }}
 
       - run:
           name: Install Dependencies
@@ -269,7 +272,7 @@ jobs:
       - save_cache:
           paths:
             - ~/.cache/pre-commit
-          key: v1-precommit-deps-{{ checksum "pre-commit-deps.txt" }}
+          key: v1-precommit-deps-{{ checksum "pre-commit-deps.txt" }}-{{ checksum "./date" }}
       - run:
           name: Check Code Style using pre-commit
           command: |
@@ -292,7 +295,7 @@ jobs:
           type: string
           default: "AIHABITAT_CONDA_PWD"
     macos:
-      xcode: 13.0.0
+      xcode: 14.2.0
     steps:
       - checkout:
           path: ./habitat-sim
@@ -315,11 +318,15 @@ jobs:
             conda install -y anaconda-client ccache cmake git ninja conda-build pip
             echo $(which -a python)
             pip install gitpython
+            cd habitat-sim
+            git submodule update --init --recursive --jobs 8
+            pip install .
+            pip uninstall -y habitat-sim
+            rm -rf build
             (yes || true) | anaconda login --username << parameters.AIHABITAT_CONDA_CHN >>  --password $<< parameters.AIHABITAT_CONDA_CHN_PWD_VAR >> --hostname "aihabitat-conda-ci-builder-macos"
             <<^ parameters.CI_TEST>>
             conda config --set anaconda_upload yes <</ parameters.CI_TEST>>
-            cd habitat-sim/conda-build
-            git submodule update --init --recursive --jobs 8
+            cd conda-build
             export PYTHONIOENCODING="utf-8"
             python matrix_builder.py <<# parameters.CI_TEST>> --ci_test <</ parameters.CI_TEST>>  <<^ parameters.CI_TEST >> --conda_upload <<# parameters.nightly>> --nightly <</ parameters.nightly>> <</ parameters.CI_TEST >>
 
@@ -355,7 +362,7 @@ jobs:
               cd habitat-sim
               pip install -r requirements.txt --progress-bar off
               git submodule update --init --recursive --jobs 8
-              python -u setup.py install --build-type "Release" --no-lto --headless --vhacd --bullet
+              python -u setup.py install --build-type "Release" --no-lto --headless --bullet
       - run:
           name: run clang-tidy
           command: |
@@ -372,8 +379,9 @@ jobs:
       - run:
           name: pip install
           command: |
-            pyenv install 3.7.10
-            pyenv global 3.7.10
+            cd /opt/circleci/.pyenv/plugins/python-build/../.. && git fetch --tags && git checkout v2.3.15 && cd -
+            pyenv install 3.9.16
+            pyenv global 3.9.16
             python3 -m pip install -U pip
             python3 -m pip install . -v
             cd ../ && python3 -c "import habitat_sim"
@@ -392,13 +400,18 @@ jobs:
       - run: &download_test_data
           name: Download test data
           command: |
+              sudo apt install git-lfs
+              git --version
+              git-lfs --version
               export PATH=$HOME/miniconda/bin:/usr/local/cuda/bin:$PATH
               . activate habitat;
+              git lfs install
+              conda install -y gitpython
 
               if [ ! -d ./data/scene_datasets/habitat-test-scenes/van-gogh-room.glb ]
               then
                 cd habitat-sim
-                python src_python/habitat_sim/utils/datasets_download.py --uids ci_test_assets --replace --data-path data/
+                python src_python/habitat_sim/utils/datasets_download.py --uids ci_test_assets --replace --data-path data/ --no-prune
               fi
 
       - run:
@@ -411,7 +424,7 @@ jobs:
               git submodule update --init --recursive --jobs 8
               pip install -r requirements.txt --progress-bar off
               pip install imageio imageio-ffmpeg
-              conda install -y -c conda-forge doxygen
+              conda install -y -c conda-forge doxygen=1.9.5
               conda install -y  jinja2 pygments docutils
               while [ ! -f ~/cuda_installed ]; do sleep 2; done # wait for CUDA
               sudo apt install --allow-change-held-packages \
@@ -421,25 +434,26 @@ jobs:
                   texlive-fonts-recommended
 
               # Rebuild with all options enabled
-              ./build.sh --with-cuda --with-bullet --vhacd
+              ./build.sh --with-cuda --with-bullet
               cd docs
               git submodule update --init
               ./build-public.sh
       - run:
           name: Install Habitat Sim and Habitat Lab
           command: |
+              echo $(date +%F) > ./date
               export PATH=$HOME/miniconda/bin:$PATH
               . activate habitat;
               cd habitat-sim
               #Rebuild headless
-              python setup.py install --headless --with-bullet --with-cuda --vhacd
+              python setup.py install --headless --with-bullet --with-cuda
               cd ..
               if [ ! -d ./habitat-lab ]
               then
                 git clone -q --depth 1 https://github.com/facebookresearch/habitat-lab.git
               fi
               cd habitat-lab
-              pip install -r requirements.txt --progress-bar off
+              pip install -r habitat-lab/requirements.txt --progress-bar off
               ln -s ../habitat-sim/data data
               touch ~/miniconda/pip_deps_installed
       - run:
@@ -448,10 +462,13 @@ jobs:
           command: |
               export PATH=$HOME/miniconda/bin:$PATH
               . activate habitat; cd habitat-lab
-              python -u setup.py develop --all
-              python -u setup.py test
+              pip install -e habitat-lab
+              pip install -e habitat-baselines
+              export PYTHONPATH=.:$PYTHONPATH
+              export MULTI_PROC_OFFSET=0 && export MAGNUM_LOG=quiet && export HABITAT_SIM_LOG=quiet
+              python -m pytest
       - save_cache:
-          key: habitat-lab-{{ checksum "./hablab_sha" }}
+          key: habitat-lab-{{ checksum "./hablab_sha" }}-{{ checksum "./date" }}
           background: true
           paths:
             - ./habitat-lab
@@ -461,15 +478,15 @@ jobs:
               export PATH=$HOME/miniconda/bin:/usr/local/cuda/bin:$PATH
               . activate habitat; cd habitat-lab
               # Install requirments first to avoid errors related to gym
-              pip install -r requirements.txt --progress-bar off
-              python setup.py develop --all
+              pip install -r habitat-lab/requirements.txt --progress-bar off
+              pip install -e habitat-lab
 
               cd docs
-              conda install -y -c conda-forge doxygen
+              conda install -y -c conda-forge doxygen=1.9.5
               conda install -y  jinja2 pygments docutils
               ./build-public.sh
       - save_cache:
-          key: conda-{{ checksum "habitat-sim/.circleci/config.yml" }}
+          key: conda-{{ checksum "habitat-sim/.circleci/config.yml" }}-{{ checksum "./date" }}
           background: true
           paths:
             - ~/miniconda
@@ -499,7 +516,7 @@ jobs:
               pip install -r requirements.txt --progress-bar off
               pip install imageio imageio-ffmpeg
               git submodule update --init --recursive --jobs 8
-              python -u setup.py install --build-type "Release" --lto --headless --vhacd --bullet
+              python -u setup.py install --build-type "Release" --lto --headless --bullet
       - run:
           name: Ccache stats
           when: always
@@ -511,7 +528,8 @@ jobs:
       - run:
           name: Build Javascript bindings
           command: |
-              # wait for npm and emscripten install
+              # Wait for npm and emscripten install. Note that npm is not strictly
+              # required (see also Run JavaScript tests in this file).
               while [[ ! -f ~/emscripten_installed && ! -f ~/npm_deps_installed ]]; do sleep 2; done
               # switch to cmake 3.20 just for this step. The JS build requires
               # static Bullet libs, and Bullet static libs required CMake 3.13+.
@@ -521,27 +539,45 @@ jobs:
               . ~/.bashrc
               export PATH=$HOME/miniconda/bin:$PATH
               . activate habitat
-              nvm use v11.9.0
               . ~/emsdk/emsdk_env.sh
-              CMAKE_GENERATOR=Ninja ./build_js.sh --bullet
+              CMAKE_GENERATOR=Ninja ./build_js.sh --bullet --no-web-apps
               # switch back to cmake 3.12
               sudo rm /usr/local/bin/cmake
               sudo ln -s /opt/cmake312/bin/cmake /usr/local/bin/cmake
+      - run:
+          name: Display dependency versions
+          no_output_timeout: 20m
+          command: |
+              export PATH=$HOME/miniconda/bin:/usr/local/cuda/bin:$PATH
+              . activate habitat
+              export CONDA_ENV_DUMP=conda_env_dump.log
+              echo "pip freeze"           | tee -a $CONDA_ENV_DUMP
+              pip freeze                  | tee -a $CONDA_ENV_DUMP
+              echo "###########"          | tee -a $CONDA_ENV_DUMP
+              echo "conda list"           | tee -a $CONDA_ENV_DUMP
+              conda list                  | tee -a $CONDA_ENV_DUMP
+              echo "###########"          | tee -a $CONDA_ENV_DUMP
+              echo "habitat-sim commit"   | tee -a $CONDA_ENV_DUMP
+              cat ./hablab_sha            | tee -a $CONDA_ENV_DUMP
+      - store_artifacts:
+          path: conda_env_dump.log  # This is the list of modules in conda and pip
       - run:
           name: Run sim benchmark
           command: |
               export PATH=$HOME/miniconda/bin:/usr/local/cuda/bin:$PATH
               . activate habitat; cd habitat-sim
               python examples/example.py --scene data/scene_datasets/habitat-test-scenes/van-gogh-room.glb --silent --test_fps_regression $FPS_THRESHOLD
-      - run:
-          name: Run JavaScript tests
-          command: |
-            cd habitat-sim
-            . ~/.bashrc
-            export PATH=$HOME/miniconda/bin:$PATH
-            . activate habitat
-            nvm use v11.9.0
-            npm run test
+
+      # reference code to test our JS build using npm/html/JS
+      # - run:
+      #     name: Run JavaScript tests
+      #     command: |
+      #       cd habitat-sim
+      #       . ~/.bashrc
+      #       export PATH=$HOME/miniconda/bin:$PATH
+      #       . activate habitat
+      #       nvm use v11.9.0
+      #       npm run test
       - run:
           name: Run sim tests
           no_output_timeout: 25m
@@ -558,7 +594,6 @@ jobs:
               # run tests with code coverage
               CORRADE_TEST_COLOR=ON GTEST_COLOR=yes ./build.sh --headless \
                 --bullet \
-                --vhacd \
                 --with-cuda \
                 --build-datatool \
                 --run-tests \
@@ -575,11 +610,34 @@ jobs:
               ./build.sh --headless --cmake-args='-DCMAKE_CXX_FLAGS="--coverage"'
               PYTHONPATH=src_python pytest -n 4 --durations=10 --cov-report=xml --cov=./ --cov-append tests/test_physics.py tests/test_sensors.py
 
-              . ~/.bashrc
-              nvm use v11.9.0
-              . ~/emsdk/emsdk_env.sh
-              # Generate JS CodeConv
-              npm run test_with_coverage
+              # reference code to generate JS CodeConv
+              # . ~/.bashrc
+              # nvm use v11.9.0
+              # . ~/emsdk/emsdk_env.sh
+              # npm run test_with_coverage
+      - run: &upload_coverage
+          name: Upload test coverage
+          command: |
+              export PATH=$HOME/miniconda/bin:/usr/local/cuda/bin:$PATH
+              . activate habitat; cd habitat-sim
+
+              curl -Os https://uploader.codecov.io/latest/linux/codecov
+              chmod +x codecov
+              #Uploading test coverage for Python code
+              ./codecov -f coverage.xml -cF Python
+
+              # reference code for uploading test coverage for JS code
+              # ./codecov coverage_js/coverage-final.json -cF JavaScript
+
+              #Uploading test coverage for C++ code
+              lcov --directory . --capture --output-file coverage.info
+              # Replaces -1 linecount with zero to prevent lcov from crashing:
+              # https://github.com/psycofdj/coverxygen/issues/6
+              sed -i -e 's/,-1$/,0/g' coverage.info
+              #lcov --remove coverage.info "*/deps/*" --output-file coverage.info > /dev/null
+              #lcov --remove coverage.info "*/test/*" --output-file coverage.info > /dev/null
+              #lcov --remove coverage.info "*/tests/*" --output-file coverage.info > /dev/null
+              ./codecov -f coverage.info -cF CPP
       -  run:
           name: Build, install habitat-sim with audio and run audio_agent script
           no_output_timeout: 10m
@@ -597,29 +655,10 @@ jobs:
           background: true
           paths:
             - /home/circleci/.ccache
-      - run:
-          name: Upload test coverage
-          command: |
-              export PATH=$HOME/miniconda/bin:/usr/local/cuda/bin:$PATH
-              . activate habitat; cd habitat-sim
-
-              curl -Os https://uploader.codecov.io/latest/linux/codecov
-              chmod +x codecov
-              #Uploading test coverage for Python code
-              ./codecov -f coverage.xml -cF Python
-
-              # Uploading test coverage for JS code
-              ./codecov coverage_js/coverage-final.json -cF JavaScript
-
-              #Uploading test coverage for C++ code
-              lcov --directory . --capture --output-file coverage.info
-              # Replaces -1 linecount with zero to prevent lcov from crashing:
-              # https://github.com/psycofdj/coverxygen/issues/6
-              sed -i -e 's/,-1$/,0/g' coverage.info
-              #lcov --remove coverage.info "*/deps/*" --output-file coverage.info > /dev/null
-              #lcov --remove coverage.info "*/test/*" --output-file coverage.info > /dev/null
-              #lcov --remove coverage.info "*/tests/*" --output-file coverage.info > /dev/null
-              ./codecov -f coverage.info -cF CPP
+      # Uploading test coverage again for code changed by the above rebuild.
+      # TODO: https://github.com/facebookresearch/habitat-sim/pull/1860 fixes
+      # this better, remove once it's merged
+      - run: *upload_coverage
 
 
 
@@ -669,7 +708,8 @@ jobs:
               docker run -it --ipc=host --rm -v $(pwd)/../../:/remote \
                   <<^ parameters.CI_TEST >> --env << parameters.AIHABITAT_CONDA_CHN_PWD_VAR >> <</ parameters.CI_TEST >> \
                   hsim_condabuild_dcontainer \
-                  /bin/bash -c "source ~/.bashrc && conda activate py37 \
+                  /bin/bash -c "source ~/.bashrc && conda activate py39 \
+                                && cd /remote/habitat-sim/ && git config --global --add safe.directory '*' \
                                 && cd /remote/habitat-sim/conda-build \
                                 <<^ parameters.CI_TEST >> && yes | anaconda login --username << parameters.AIHABITAT_CONDA_CHN >> --password \${<< parameters.AIHABITAT_CONDA_CHN_PWD_VAR >>} <</ parameters.CI_TEST >> --hostname "aihabitat-conda-ci-builder-linux" \
                                 && python matrix_builder.py \
@@ -748,6 +788,7 @@ workflows:
       - update_docs:
           requires:
             - install_and_test_ubuntu
+            - lab_build_habitat
           filters:
             branches:
               only: main

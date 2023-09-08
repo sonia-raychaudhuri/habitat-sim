@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -12,6 +12,7 @@ from functools import partial
 if "google.colab" in sys.modules:
     os.environ["IMAGEIO_FFMPEG_EXE"] = "/usr/bin/ffmpeg"
 
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import imageio
@@ -19,7 +20,7 @@ import numpy as np
 from PIL import Image
 from tqdm.auto import tqdm
 
-from habitat_sim.utils.common import d3_40_colors_rgb
+from habitat_sim.utils.common import d3_40_colors_hex, d3_40_colors_rgb
 
 
 def is_notebook() -> bool:
@@ -49,7 +50,7 @@ def get_fast_video_writer(video_file: str, fps: int = 60):
             codec="h264_nvenc",
             mode="I",
             bitrate="1000k",
-            format="FFMPEG",
+            format="FFMPEG",  # type: ignore[arg-type]
             ffmpeg_log_level="info",
             output_params=["-minrate", "500k", "-maxrate", "5000k"],
         )
@@ -166,7 +167,6 @@ def make_video_frame(
     overlay_settings=None,
     observation_to_image=observation_to_image,
 ):
-
     image_frame = observation_to_image(ob[primary_obs], primary_obs_type)
     if image_frame is None:
         raise RuntimeError(
@@ -287,3 +287,36 @@ def semantic_to_rgb(semantic_image: np.ndarray) -> np.ndarray:
     semantic_image_rgb.putdata((semantic_image.flatten() % 40).astype(np.uint8))
     semantic_image_rgb = semantic_image_rgb.convert("RGBA")
     return semantic_image_rgb
+
+
+def get_island_colored_map(island_top_down_map_data: np.ndarray):
+    """
+    Get the topdown map for a scene with island colors.
+
+    :param island_top_down_map_data: The island index map data from Pathfinder.get_topdown_island_view()
+
+    :return: rgb Image of islands at the desired slice.
+    """
+
+    white = int("0xffffff", base=16)
+    island_map = Image.new("RGB", island_top_down_map_data.shape, color=white)
+    pixels = island_map.load()
+    extra_colors: List[int] = []
+    r = lambda: random.randint(0, 255)
+    for x in range(island_top_down_map_data.shape[0]):
+        for y in range(island_top_down_map_data.shape[1]):
+            if island_top_down_map_data[x, y] >= 0:
+                color_index = island_top_down_map_data[x, y]
+                if color_index < len(d3_40_colors_hex):
+                    # fixed colors from a selected list
+                    # NOTE: PIL Image origin is top left, so invert y
+                    pixels[x, -y] = int(d3_40_colors_hex[color_index], base=16)
+                else:
+                    random_color_index = color_index - len(d3_40_colors_hex)
+                    # pick random colors once fixed colors are overflowed
+                    while random_color_index >= len(extra_colors):
+                        new_color = int(("0x%02X%02X%02X" % (r(), r(), r())), base=16)
+                        if new_color not in extra_colors:
+                            extra_colors.append(new_color)
+                    pixels[x, -y] = extra_colors[random_color_index]
+    return island_map

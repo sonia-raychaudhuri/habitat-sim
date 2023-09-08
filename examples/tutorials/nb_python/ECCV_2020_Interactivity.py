@@ -203,6 +203,7 @@ def make_default_settings():
         "width": 720,  # Spatial resolution of the observations
         "height": 544,
         "scene": "./data/scene_datasets/mp3d_example/17DRP5sb8fy/17DRP5sb8fy.glb",  # Scene path
+        "scene_dataset_config": "./data/scene_datasets/mp3d_example/mp3d.scene_dataset_config.json",  # MP3D scene dataset
         "default_agent": 0,
         "sensor_height": 1.5,  # Height of sensors in meters
         "sensor_pitch": -math.pi / 8.0,  # sensor pitch (x rotation in rads)
@@ -338,6 +339,7 @@ def sample_object_state(
 # @markdown (double click to show code)
 # @markdown - display_sample
 
+
 # Change to do something like this maybe: https://stackoverflow.com/a/41432704
 def display_sample(
     rgb_obs, semantic_obs=np.array([]), depth_obs=np.array([]), key_points=None
@@ -395,6 +397,7 @@ else:
 # %%
 # @title Define Colab GUI Utility Functions { display-mode: "form" }
 # @markdown (double click to show code)
+
 
 # Event handler for dropdowns displaying file-based object handles
 def on_file_obj_ddl_change(ddl_values):
@@ -945,9 +948,8 @@ print("Placement fails = " + str(fails) + "/" + str(num_objects))
 # recompute the NavMesh with STATIC objects
 navmesh_settings = habitat_sim.NavMeshSettings()
 navmesh_settings.set_defaults()
-navmesh_success = sim.recompute_navmesh(
-    sim.pathfinder, navmesh_settings, include_static_objects=True
-)
+navmesh_settings.include_static_objects = True
+navmesh_success = sim.recompute_navmesh(sim.pathfinder, navmesh_settings)
 
 # simulate and collect observations
 example_type = "clutter generation"

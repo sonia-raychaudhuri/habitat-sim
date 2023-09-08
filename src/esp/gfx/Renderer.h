@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -174,7 +174,7 @@ class Renderer {
    * @param[in,out] helper, a helper cubemap with the same cube size, and
    * texture type (e.g., color, variance shadow map)
    * @param[in] type cubemap texture type, indicating which texture type the
-   * filtering would apply to. It can ONLY be Color, VarianceShadowMap
+   * filtering would apply to. It can ONLY be Color
    */
   void applyGaussianFiltering(CubeMap& target,
                               CubeMap& helper,

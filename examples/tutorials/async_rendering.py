@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -40,7 +40,6 @@ def main():
     backend_cfg.scene_id = (
         "data/scene_datasets/habitat-test-scenes/skokloster-castle.glb"
     )
-    backend_cfg.enable_physics = True
 
     # Leaving the context with the background thread can improve
     # performance, but makes it so that sim.get_sensor_observations_async_finish()
@@ -84,7 +83,6 @@ def main():
 
     backend_cfg = habitat_sim.SimulatorConfiguration()
     backend_cfg.scene_id = "data/scene_datasets/habitat-test-scenes/apartment_1.glb"
-    backend_cfg.enable_physics = True
     new_cfg = habitat_sim.Configuration(backend_cfg, [agent_cfg])
 
     # To create a new instance of the simulator to swap scene or similar,

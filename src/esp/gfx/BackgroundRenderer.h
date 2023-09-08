@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -9,18 +9,13 @@
 
 #ifdef ESP_BUILD_WITH_BACKGROUND_RENDERER
 
-#include <atomic>
 #include <thread>
 
-#include "esp/core/Esp.h"
 #include "esp/gfx/RenderCamera.h"
 #include "esp/gfx/Renderer.h"
 #include "esp/gfx/WindowlessContext.h"
 #include "esp/scene/SceneGraph.h"
 #include "esp/sensor/VisualSensor.h"
-
-#include <Corrade/Containers/Pointer.h>
-#include <Magnum/Platform/GLContext.h>
 
 namespace esp {
 namespace gfx {
@@ -62,7 +57,6 @@ class BackgroundRenderer {
   bool threadIsWorking_, threadInitialized_;
 
   bool threadOwnsContext_;
-  Corrade::Containers::Pointer<Magnum::Platform::GLContext> threadContext_;
   Task task_;
   std::vector<std::tuple<std::reference_wrapper<sensor::VisualSensor>,
                          std::reference_wrapper<scene::SceneGraph>,

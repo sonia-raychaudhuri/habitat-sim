@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 //
@@ -17,6 +17,8 @@
 #include "esp/gfx/RenderCamera.h"
 #include "esp/gfx/RenderTarget.h"
 #include "esp/gfx/WindowlessContext.h"
+#include "esp/gfx_batch/DepthUnprojection.h"
+#include "esp/metadata/MetadataMediator.h"
 #include "esp/scene/SceneManager.h"
 
 #include "configure.h"
@@ -190,7 +192,7 @@ void CullingTest::frustumCulling() {
   // create a render target
   Mn::Matrix4 projMtx = renderCamera.projectionMatrix();
   esp::gfx::RenderTarget::uptr target = esp::gfx::RenderTarget::create_unique(
-      frameBufferSize, esp::gfx::calculateDepthUnprojection(projMtx));
+      frameBufferSize, esp::gfx_batch::calculateDepthUnprojection(projMtx));
 
   // ============== Test 1 ==================
   // draw all the invisibles reported by cull()

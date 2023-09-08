@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -79,11 +79,18 @@ LightSetup getLightsAtBoxCorners(const Magnum::Range3D& box,
 
 LightSetup getDefaultLights() {
   return LightSetup{
-      {{0.0, 0.5, 1.0, 0.0}, {2.4, 2.4, 2.4}},     // forward
-      {{0.0, 0.5, -1.0, 0.0}, {2.4, 2.4, 2.4}},    // backward
-      {{-1.0, 1.0, 0.0, 0.0}, {2.0, 2.0, 2.0}},    // top left
-      {{1.0, 1.0, 1.0, 0.0}, {2.0, 2.0, 2.0}},     // top right
-      {{0.0, -1.0, 0.0, 0.0}, {0.64, 0.64, 0.64}}  // bottom
+      {{0.0, -0.5, -0.5, 0.0},
+       {0.5, 0.5, 0.5},
+       LightPositionModel::Global},  // -z
+      {{0.0, -0.5, 0.5, 0.0},
+       {0.5, 0.5, 0.5},
+       LightPositionModel::Global},  // +z
+      {{-0.5, -0.5, 0.0, 0.0},
+       {0.5, 0.5, 0.5},
+       LightPositionModel::Global},  // -x
+      {{0.5, -0.5, 0.0, 0.0},
+       {0.5, 0.5, 0.5},
+       LightPositionModel::Global},  // +x
   };
 }
 

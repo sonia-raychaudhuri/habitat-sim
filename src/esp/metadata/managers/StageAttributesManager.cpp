@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "AbstractObjectAttributesManagerBase.h"
+#include "AbstractObjectAttributesManager.h"
 #include "StageAttributesManager.h"
 
 #include "esp/assets/Asset.h"
@@ -25,33 +25,36 @@ using attributes::StageAttributes;
 namespace managers {
 
 StageAttributesManager::StageAttributesManager(
-    ObjectAttributesManager::ptr objectAttributesMgr,
     PhysicsAttributesManager::ptr physicsAttributesManager)
     : AbstractObjectAttributesManager<StageAttributes,
                                       ManagedObjectAccess::Copy>::
           AbstractObjectAttributesManager("Stage", "stage_config.json"),
-      objectAttributesMgr_(std::move(objectAttributesMgr)),
       physicsAttributesManager_(std::move(physicsAttributesManager)),
       cfgLightSetup_(NO_LIGHT_KEY) {
   // build this manager's copy constructor map
   this->copyConstructorMap_["StageAttributes"] =
       &StageAttributesManager::createObjectCopy<attributes::StageAttributes>;
+
+}  // StageAttributesManager::ctor
+
+void StageAttributesManager::createDefaultPrimBasedAttributesTemplates() {
   // create none-type stage attributes and set as undeletable
   // based on default
   auto tmplt = this->postCreateRegister(
       StageAttributesManager::initNewObjectInternal("NONE", false), true);
   std::string tmpltHandle = tmplt->getHandle();
-  this->undeletableObjectNames_.insert(tmpltHandle);
-}  // StageAttributesManager::ctor
+  this->undeletableObjectNames_.insert(std::move(tmpltHandle));
+}  // StageAttributesManager::createDefaultPrimBasedAttributesTemplates
 
 int StageAttributesManager::registerObjectFinalize(
     StageAttributes::ptr stageAttributes,
     const std::string& stageAttributesHandle,
     bool forceRegistration) {
   if (stageAttributes->getRenderAssetHandle() == "") {
-    ESP_ERROR()
-        << "Attributes template named" << stageAttributesHandle
-        << "does not have a valid render asset handle specified. Aborting.";
+    ESP_ERROR(Mn::Debug::Flag::NoSpace)
+        << "Attributes template named `" << stageAttributesHandle
+        << "` does not have a valid render asset handle specified, so "
+           "StageAttributes registration is aborted.";
     return ID_UNDEFINED;
   }
 
@@ -78,16 +81,17 @@ int StageAttributesManager::registerObjectFinalize(
   } else if (forceRegistration) {
     ESP_WARNING()
         << "Render asset template handle :" << renderAssetHandle
-        << "specified in stage template with handle :" << stageAttributesHandle
-        << "does not correspond to any existing file or primitive render "
+        << "specified in stage template with handle `" << stageAttributesHandle
+        << "` does not correspond to any existing file or primitive render "
            "asset. This attributes is not in a valid state.";
   } else {
     // If renderAssetHandle is not valid file name needs to  fail
-    ESP_ERROR()
-        << "Render asset template handle :" << renderAssetHandle
-        << "specified in stage template with handle :" << stageAttributesHandle
+    ESP_ERROR(Mn::Debug::Flag::NoSpace)
+        << "Render asset template handle `" << renderAssetHandle
+        << "` specified in stage template with handle :"
+        << stageAttributesHandle
         << "does not correspond to any existing file or primitive render "
-           "asset.  Aborting.";
+           "asset, so StageAttributes registration is aborted.";
     return ID_UNDEFINED;
   }
 
@@ -124,8 +128,8 @@ int StageAttributesManager::registerObjectFinalize(
   // adds template to library, and returns either the ID of the existing
   // template referenced by stageAttributesHandle, or the next available ID
   // if not found.
-  int stageTemplateID =
-      this->addObjectToLibrary(stageAttributes, stageAttributesHandle);
+  int stageTemplateID = this->addObjectToLibrary(std::move(stageAttributes),
+                                                 stageAttributesHandle);
   return stageTemplateID;
 }  // StageAttributesManager::registerAttributesTemplate
 
@@ -136,7 +140,8 @@ StageAttributes::ptr StageAttributesManager::createPrimBasedAttributesTemplate(
   if (!StageAttributesManager::isValidPrimitiveAttributes(primAssetHandle)) {
     ESP_ERROR(Mn::Debug::Flag::NoSpace)
         << "No primitive with handle '" << primAssetHandle
-        << "' exists so cannot build physical object.  Aborting.";
+        << "' exists so cannot build physical object, so "
+           "createPrimBasedAttributesTemplate for stage aborted.";
     return nullptr;
   }
 
@@ -156,7 +161,7 @@ StageAttributes::ptr StageAttributesManager::createPrimBasedAttributesTemplate(
   // collision primitive mesh needs to be configured and set in MeshMetaData
   // and CollisionMesh
 
-  return this->postCreateRegister(stageAttributes, registerTemplate);
+  return this->postCreateRegister(std::move(stageAttributes), registerTemplate);
 }  // StageAttributesManager::createPrimBasedAttributesTemplate
 
 StageAttributes::ptr StageAttributesManager::initNewObjectInternal(
@@ -339,10 +344,6 @@ void StageAttributesManager::setDefaultAssetNameBasedAttributes(
   fwd = fwd1;
   if (endsWith(fileName, "_semantic.ply")) {
     assetTypeSetter(static_cast<int>(AssetType::INSTANCE_MESH));
-  } else if (endsWith(fileName, "mesh.ply")) {
-    assetTypeSetter(static_cast<int>(AssetType::FRL_PTEX_MESH));
-    up = up2;
-    fwd = fwd2;
   } else if (endsWith(fileName, ".glb")) {
     // assumes MP3D glb with gravity = -Z
     assetTypeSetter(static_cast<int>(AssetType::MP3D_MESH));
@@ -364,7 +365,7 @@ void StageAttributesManager::setDefaultAssetNameBasedAttributes(
 void StageAttributesManager::setValsFromJSONDoc(
     attributes::StageAttributes::ptr stageAttributes,
     const io::JsonGenericValue& jsonConfig) {
-  this->loadAbstractObjectAttributesFromJson(stageAttributes, jsonConfig);
+  this->setAbstractObjectAttributesFromJson(stageAttributes, jsonConfig);
 
   // directory location where stage files are found
   std::string stageLocFileDir = stageAttributes->getFileDirectory();
@@ -408,7 +409,6 @@ void StageAttributesManager::setValsFromJSONDoc(
 
   std::string navmeshFName = "";
   std::string semanticSceneDescriptor = "";
-  std::string lightSetup = "";
 
   // populate semantic mesh type if present
   std::string semanticFName = stageAttributes->getSemanticAssetHandle();

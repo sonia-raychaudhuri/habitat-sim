@@ -1,3 +1,7 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 set(
   sensor_SOURCES
   CameraSensor.cpp
@@ -38,7 +42,7 @@ add_library(
 
 target_link_libraries(
   sensor
-  PUBLIC core gfx scene sim
+  PUBLIC core gfx gfx_batch scene sim
 )
 
 # ATTENTION developers !!!!!!!!!!!!!!!!!!!!

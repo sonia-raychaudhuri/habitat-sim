@@ -49,6 +49,7 @@ import git
 import numpy as np
 
 import habitat_sim
+from habitat_sim.bindings import built_with_bullet
 from habitat_sim.utils import common as ut
 from habitat_sim.utils import viz_utils as vut
 
@@ -210,7 +211,7 @@ def make_default_settings():
         "depth_sensor_1st_person": False,  # Depth sensor
         "semantic_sensor_1st_person": False,  # Semantic sensor
         "seed": 1,
-        "enable_physics": True,  # enable dynamics simulation
+        "enable_physics": built_with_bullet,  # enable dynamics simulation if bullet is present
     }
     return settings
 
@@ -260,6 +261,7 @@ def make_simulator_from_settings(sim_settings):
 # @markdown (double click to show code)
 
 # @markdown This cell defines utility functions that expose Attribute template object properties.
+
 
 # This method builds a dictionary of k-v pairs of attribute property names and
 # values shared by all attribute template types.  The values are tuples with the
@@ -552,6 +554,7 @@ def show_template_properties(template):
 # @title Define Simulation Utility Functions { display-mode: "form" }
 # @markdown (double click to show code)
 
+
 # @markdown - simulate
 def simulate(sim, dt=1.0, get_frames=True):
     # simulate dt seconds at 60Hz to the nearest fixed timestep
@@ -570,6 +573,7 @@ def simulate(sim, dt=1.0, get_frames=True):
 # @markdown (double click to show code)
 
 # @markdown This cell provides utility functions to build and manage IPyWidget interactive components.
+
 
 # Event handler for dropdowns displaying file-based object handles
 def on_file_obj_ddl_change(ddl_values):
@@ -761,7 +765,6 @@ clip_short_name = object_to_view_path.split("/")[-1].split(".")[0]
 
 # check if desired object actually exists
 if os.path.exists(object_to_view_path) and os.path.isfile(object_to_view_path):
-
     # Acquire the sensor being used
     visual_sensor = sim._sensors["color_sensor_3rd_person"]
     initial_sensor_position = np.array(visual_sensor._spec.position)

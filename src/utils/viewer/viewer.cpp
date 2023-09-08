@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -9,7 +9,6 @@
 #include <iostream>
 
 #include <Magnum/configure.h>
-#include <Magnum/ImGuiIntegration/Context.hpp>
 #ifdef MAGNUM_TARGET_WEBGL
 #include <Magnum/Platform/EmscriptenApplication.h>
 #else
@@ -35,32 +34,37 @@
 #include "esp/scene/SceneNode.h"
 #include "esp/sensor/configure.h"
 
+#include <Corrade/PluginManager/Manager.h>
 #include <Corrade/Utility/Arguments.h>
 #include <Corrade/Utility/Assert.h>
 #include <Corrade/Utility/Debug.h>
 #include <Corrade/Utility/DebugStl.h>
 #include <Corrade/Utility/FormatStl.h>
 #include <Corrade/Utility/Path.h>
+#include <Corrade/Utility/Resource.h>
 #include <Corrade/Utility/String.h>
 #include <Magnum/DebugTools/FrameProfiler.h>
 #include <Magnum/DebugTools/Screenshot.h>
 #include <Magnum/EigenIntegration/GeometryIntegration.h>
 #include <Magnum/GL/DefaultFramebuffer.h>
 #include <Magnum/GL/Renderer.h>
+#include <Magnum/Shaders/VectorGL.h>
+#include <Magnum/Text/AbstractFont.h>
+#include <Magnum/Text/GlyphCache.h>
+#include <Magnum/Text/Renderer.h>
 #include "esp/core/Esp.h"
 #include "esp/core/Utility.h"
 #include "esp/gfx/Drawable.h"
 #include "esp/scene/SemanticScene.h"
 
-#ifdef ESP_BUILD_WITH_VHACD
-#include "esp/geo/VoxelUtils.h"
-#endif
-
 #ifdef ESP_BUILD_WITH_AUDIO
 #include "esp/sensor/AudioSensor.h"
 #endif  // ESP_BUILD_WITH_AUDIO
 
+#include "esp/metadata/MetadataMediator.h"
 #include "esp/physics/configure.h"
+#include "esp/physics/objectManagers/ArticulatedObjectManager.h"
+#include "esp/physics/objectManagers/RigidObjectManager.h"
 #include "esp/sensor/CameraSensor.h"
 #include "esp/sensor/EquirectangularSensor.h"
 #include "esp/sensor/FisheyeSensor.h"
@@ -289,19 +293,6 @@ class Viewer : public Mn::Platform::Application {
   void removeLastObject();
   void invertGravity();
 
-#ifdef ESP_BUILD_WITH_VHACD
-  void displayStageDistanceGradientField();
-
-  void iterateAndDisplaySignedDistanceField();
-
-  void displayVoxelField(int objectID);
-
-  int objectDisplayed = -1;
-
-  //! The slice of the grid's SDF to visualize.
-  int voxelDistance = 0;
-#endif
-
   /**
    * @brief Toggle between ortho and perspective camera
    */
@@ -351,8 +342,6 @@ In LOOK mode (default):
     Read Semantic ID and tag of clicked object (Currently only HM3D);
   SHIFT-RIGHT:
     Click a mesh to highlight it.
-  CTRL-RIGHT:
-    (physics) Click on an object to voxelize it and display the voxelization.
   WHEEL:
     Modify orthographic camera zoom/perspective camera FOV (+SHIFT for fine grained control)
 In GRAB mode (with 'enable-physics'):
@@ -409,8 +398,6 @@ Key Commands:
   'b': Toggle display of object bounding boxes.
   'p': Save current simulation state to SceneInstanceAttributes JSON file (with non-colliding filename).
   'v': (physics) Invert gravity.
-  'g': (physics) Display a stage's signed distance gradient vector field.
-  'k': (physics) Iterate through different ranges of the stage's voxelized signed distance field.
 
   Additional Utilities:
   'r': Write a replay of the recent simulated frames to a file specified by --gfx-replay-record-filepath.
@@ -621,7 +608,12 @@ Key Commands:
 
   Mn::Timeline timeline_;
 
-  Mn::ImGuiIntegration::Context imgui_{Mn::NoCreate};
+  /* Text rendering */
+  Cr::PluginManager::Manager<Mn::Text::AbstractFont> fontManager_;
+  Cr::Containers::Pointer<Mn::Text::AbstractFont> font_;
+  Cr::Containers::Optional<Mn::Text::GlyphCache> fontGlyphCache_;
+  Mn::Shaders::VectorGL2D fontShader_;
+  Cr::Containers::Optional<Mn::Text::Renderer2D> fontText_;
   bool showFPS_ = true;
 
   // NOTE: Mouse + shift is to select object on the screen!!
@@ -836,9 +828,13 @@ Viewer::Viewer(const Arguments& arguments)
       .addOption("dataset", "default")
       .setHelp("dataset", "dataset configuration file to use")
       .addBooleanOption("enable-physics")
-      .addBooleanOption("stage-requires-lighting")
-      .setHelp("stage-requires-lighting",
-               "Stage asset should be lit with Phong shading.")
+      .setHelp("enable-physics", "Enable Bullet physics.")
+      .addBooleanOption("hbao")
+      .setHelp("hbao",
+               "NOT YET SUPPORTED : Enable Horizon-based Ambient Occlusion.")
+      .addBooleanOption("use-default-lighting")
+      .setHelp("use-default-lighting",
+               "Scene should be lit using the default lighting configuration.")
       .addBooleanOption("debug-bullet")
       .setHelp("debug-bullet", "Render Bullet physics debug wireframes.")
       .addOption("gfx-replay-record-filepath")
@@ -866,8 +862,6 @@ Viewer::Viewer(const Arguments& arguments)
       .addOption("agent-transform-filepath")
       .setHelp("agent-transform-filepath",
                "Specify path to load camera transform from.")
-      .addBooleanOption("shadows")
-      .setHelp("shadows", "Rendering shadows. (only works with PBR rendering.")
       .addBooleanOption("ibl")
       .setHelp("ibl",
                "Image Based Lighting (it works only when PBR models exist in "
@@ -876,19 +870,38 @@ Viewer::Viewer(const Arguments& arguments)
 
   const auto viewportSize = Mn::GL::defaultFramebuffer.viewport().size();
 
-  imgui_ =
-      Mn::ImGuiIntegration::Context(Mn::Vector2{windowSize()} / dpiScaling(),
-                                    windowSize(), framebufferSize());
-  ImGui::GetIO().IniFilename = nullptr;
+  /* Set up text rendering */
+  {
+    /* Render the font in a size corresponding to actual pixels, taking DPI
+       scaling into account. Docs for reference:
+       https://doc.magnum.graphics/magnum/classMagnum_1_1Platform_1_1Sdl2Application.html#Platform-Sdl2Application-dpi
+     */
+    const Mn::Float fontSize =
+        13.0f * (Mn::Vector2{framebufferSize()} * dpiScaling() /
+                 Mn::Vector2{windowSize()})
+                    .x();
 
-  /* Set up proper blending to be used by ImGui. There's a great chance
-     you'll need this exact behavior for the rest of your scene. If not, set
-     this only for the drawFrame() call. */
-  Mn::GL::Renderer::setBlendEquation(Mn::GL::Renderer::BlendEquation::Add,
-                                     Mn::GL::Renderer::BlendEquation::Add);
-  Mn::GL::Renderer::setBlendFunction(
-      Mn::GL::Renderer::BlendFunction::SourceAlpha,
-      Mn::GL::Renderer::BlendFunction::OneMinusSourceAlpha);
+    Cr::Utility::Resource rs{"fonts"};
+    font_ = fontManager_.loadAndInstantiate("TrueTypeFont");
+    if (!font_ || !font_->openData(rs.getRaw("ProggyClean.ttf"), fontSize))
+      Mn::Fatal{} << "Cannot open font file";
+
+    fontGlyphCache_.emplace(Mn::Vector2i{256});
+    /* Don't destroy the bitmap font with smooth scaling */
+    fontGlyphCache_->texture().setMagnificationFilter(
+        Mn::SamplerFilter::Nearest);
+    font_->fillGlyphCache(*fontGlyphCache_,
+                          "abcdefghijklmnopqrstuvwxyz"
+                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                          "0123456789:-_+,.! %µ");
+
+    /* But as the text projection uses virtual window pixels, use just the
+       unscaled size for the actual text */
+    fontText_.emplace(*font_, *fontGlyphCache_, fontSize,
+                      Mn::Text::Alignment::TopLeft);
+    fontText_->reserve(1024, Mn::GL::BufferUsage::DynamicDraw,
+                       Mn::GL::BufferUsage::StaticDraw);
+  }
 
   // Setup renderer and shader defaults
   Mn::GL::Renderer::enable(Mn::GL::Renderer::Feature::DepthTest);
@@ -952,12 +965,15 @@ Viewer::Viewer(const Arguments& arguments)
   simConfig_.activeSceneName = args.value("scene");
   simConfig_.sceneDatasetConfigFile = args.value("dataset");
   simConfig_.enablePhysics = args.isSet("enable-physics");
+  if (args.isSet("hbao")) {
+    ESP_WARNING() << "HBAO NOT YET SUPPORTED. Ignoring flag setting.";
+  }
   simConfig_.frustumCulling = true;
   simConfig_.requiresTextures = true;
   simConfig_.enableGfxReplaySave = !gfxReplayRecordFilepath_.empty();
   simConfig_.useSemanticTexturesIfFound = !args.isSet("no-semantic-textures");
-  if (args.isSet("stage-requires-lighting")) {
-    ESP_DEBUG() << "Stage using DEFAULT_LIGHTING_KEY";
+  if (args.isSet("use-default-lighting")) {
+    ESP_DEBUG() << "Scene lit using DEFAULT_LIGHTING_KEY";
     simConfig_.overrideSceneLightDefaults = true;
     simConfig_.sceneLightSetupKey = esp::DEFAULT_LIGHTING_KEY;
   }
@@ -1063,14 +1079,6 @@ Viewer::Viewer(const Arguments& arguments)
   // Per frame profiler will average measurements taken over previous 50 frames
   profiler_.setup(profilerValues, 50);
 
-  // shadows
-  if (args.isSet("shadows")) {
-    simulator_->updateShadowMapDrawableGroup();
-    simulator_->computeShadowMaps(0.01f,   // lightNearPlane
-                                  20.0f);  // lightFarPlane
-    simulator_->setShadowMapsToDrawables();
-  }
-
   printHelpText();
 }  // end Viewer::Viewer
 
@@ -1093,8 +1101,9 @@ void Viewer::initSimPostReconfigure() {
     esp::nav::NavMeshSettings navMeshSettings;
     navMeshSettings.agentHeight = agentConfig_.height;
     navMeshSettings.agentRadius = agentConfig_.radius;
+    navMeshSettings.includeStaticObjects = true;
     simulator_->recomputeNavMesh(*simulator_->getPathFinder().get(),
-                                 navMeshSettings, true);
+                                 navMeshSettings);
   } else if (!navmeshFilename_.empty()) {
     std::string navmeshFile = Cr::Utility::Path::join(
         *Corrade::Utility::Path::currentDirectory(), navmeshFilename_);
@@ -1415,7 +1424,7 @@ void Viewer::buildTrajectoryVis() {
   int numClrs = (singleColorTrajectory_ ? 1 : rand() % 4 + 2);
   clrs.reserve(numClrs);
   for (int i = 0; i < numClrs; ++i) {
-    clrs.emplace_back(Mn::Color3{randomDirection()});
+    clrs.emplace_back(randomDirection());
   }
   // synthesize a name for asset based on color, radius, point count
   std::string trajObjName = Cr::Utility::formatString(
@@ -1449,98 +1458,6 @@ void Viewer::invertGravity() {
   const Mn::Vector3 invGravity = -1 * gravity;
   simulator_->setGravity(invGravity);
 }
-#ifdef ESP_BUILD_WITH_VHACD
-
-void Viewer::displayStageDistanceGradientField() {
-  // Temporary key event used for testing & visualizing Voxel Grid framework
-  std::shared_ptr<esp::geo::VoxelWrapper> stageVoxelization;
-  stageVoxelization = simulator_->getStageVoxelization();
-
-  // if the object hasn't been voxelized, do that and generate an SDF as
-  // well
-  !ESP_DEBUG();
-  if (stageVoxelization == nullptr) {
-    simulator_->createStageVoxelization(2000000);
-    stageVoxelization = simulator_->getStageVoxelization();
-    esp::geo::generateEuclideanDistanceSDF(stageVoxelization,
-                                           "ESignedDistanceField");
-  }
-  !ESP_DEBUG();
-
-  // generate a vector field for the SDF gradient
-  esp::geo::generateScalarGradientField(
-      stageVoxelization, "ESignedDistanceField", "GradientField");
-  // generate a mesh of the vector field with boolean isVectorField set to
-  // true
-  !ESP_DEBUG();
-
-  stageVoxelization->generateMesh("GradientField");
-
-  // draw the vector field
-  simulator_->setStageVoxelizationDraw(true, "GradientField");
-}
-
-void Viewer::iterateAndDisplaySignedDistanceField() {
-  // Temporary key event used for testing & visualizing Voxel Grid framework
-  std::shared_ptr<esp::geo::VoxelWrapper> stageVoxelization;
-  stageVoxelization = simulator_->getStageVoxelization();
-
-  // if the object hasn't been voxelized, do that and generate an SDF as
-  // well
-  if (stageVoxelization == nullptr) {
-    simulator_->createStageVoxelization(2000000);
-    stageVoxelization = simulator_->getStageVoxelization();
-    esp::geo::generateEuclideanDistanceSDF(stageVoxelization,
-                                           "ESignedDistanceField");
-  }
-
-  // Set the range of distances to render, and generate a mesh for this (18
-  // is set to be the max distance)
-  Mn::Vector3i dims = stageVoxelization->getVoxelGridDimensions();
-  int curDistanceVisualization = (voxelDistance % dims[0]);
-  /*sceneVoxelization->generateBoolGridFromFloatGrid("ESignedDistanceField",
-     "SDFSubset", curDistanceVisualization, curDistanceVisualization + 1);*/
-  stageVoxelization->generateSliceMesh("ESignedDistanceField",
-                                       curDistanceVisualization, -15.0f, 0.0f);
-  // Draw the voxel grid's slice
-  simulator_->setStageVoxelizationDraw(true, "ESignedDistanceField");
-}
-
-void Viewer::displayVoxelField(int objectID) {
-  // create a voxelization and get a pointer to the underlying VoxelWrapper
-  // class
-  unsigned int resolution = 2000000;
-  std::shared_ptr<esp::geo::VoxelWrapper> voxelWrapper;
-  if (objectID == -1) {
-    simulator_->createStageVoxelization(resolution);
-    voxelWrapper = simulator_->getStageVoxelization();
-  } else {
-    simulator_->createObjectVoxelization(objectID, resolution);
-    voxelWrapper = simulator_->getObjectVoxelization(objectID);
-  }
-
-  // turn off the voxel grid visualization for the last voxelized object
-  if (objectDisplayed == -1) {
-    simulator_->setStageVoxelizationDraw(false, "Boundary");
-  } else if (objectDisplayed >= 0) {
-    simulator_->setObjectVoxelizationDraw(false, objectDisplayed, "Boundary");
-  }
-
-  // Generate the mesh for the boundary voxel grid
-  voxelWrapper->generateMesh("Boundary");
-
-  esp::geo::generateEuclideanDistanceSDF(voxelWrapper, "ESignedDistanceField");
-
-  // visualizes the Boundary voxel grid
-  if (objectID == -1) {
-    simulator_->setStageVoxelizationDraw(true, "Boundary");
-  } else {
-    simulator_->setObjectVoxelizationDraw(true, objectID, "Boundary");
-  }
-
-  objectDisplayed = objectID;
-}
-#endif
 
 // generate random direction vectors:
 Mn::Vector3 Viewer::randomDirection() {
@@ -1738,72 +1655,85 @@ void Viewer::drawEvent() {
     sensorRenderTarget->blitRgbaToDefault();
   }
 
-  // Immediately bind the main buffer back so that the "imgui" below can work
-  // properly
+  // Immediately bind the main buffer back
   Mn::GL::defaultFramebuffer.bind();
 
-  // Do not include ImGui content drawing in per frame profiler measurements
+  // Do not include text drawing in per frame profiler measurements
   profiler_.endFrame();
 
-  imgui_.newFrame();
-  ImGui::SetNextWindowPos(ImVec2(10, 10));
   if (showFPS_) {
-    ImGui::Begin("main", NULL,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
-                     ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SetWindowFontScale(1.5);
-    ImGui::Text("%.1f FPS", Mn::Double(ImGui::GetIO().Framerate));
+    std::string text;
     uint32_t total = activeSceneGraph_->getDrawables().size();
-    ImGui::Text("%u drawables", total);
+    Cr::Utility::formatInto(
+        text, text.size(),
+        "{:.1f} FPS\n"
+        "{} drawables",
+        profiler_.isMeasurementAvailable(
+            Mn::DebugTools::FrameProfilerGL::Value::FrameTime)
+            ? 1.0e9 / profiler_.frameTimeMean()
+            : 0.0,
+        total);
     if (sensorMode_ == VisualSensorMode::Camera) {
-      ImGui::Text("%u culled", total - visibles);
+      Cr::Utility::formatInto(text, text.size(), ", {} culled",
+                              total - visibles);
     }
-    auto& cam = getAgentCamera();
+    text += '\n';
 
     switch (sensorMode_) {
-      case VisualSensorMode::Camera:
+      case VisualSensorMode::Camera: {
+        auto& cam = getAgentCamera();
         if (cam.getCameraType() == esp::sensor::SensorSubType::Orthographic) {
-          ImGui::Text("Orthographic camera sensor");
+          text += "Orthographic camera sensor\n";
         } else if (cam.getCameraType() == esp::sensor::SensorSubType::Pinhole) {
-          ImGui::Text("Pinhole camera sensor");
+          text += "Pinhole camera sensor\n";
         };
-        break;
+      } break;
       case VisualSensorMode::Fisheye:
-        ImGui::Text("Fisheye sensor");
+        text += "Fisheye sensor\n";
         break;
       case VisualSensorMode::Equirectangular:
-        ImGui::Text("Equirectangular sensor");
+        text += "Equirectangular sensor\n";
         break;
 
       default:
         break;
     }
-    ImGui::Text("%s", profiler_.statistics().c_str());
-    std::string modeText =
-        "Mouse Interaction Mode: " + mouseModeNames.at(mouseInteractionMode);
-    ImGui::Text("%s", modeText.c_str());
+    Cr::Utility::formatInto(text, text.size(),
+                            "{}\n"
+                            "Mouse Interaction Mode: {}\n",
+                            profiler_.statistics(),
+                            mouseModeNames.at(mouseInteractionMode));
+
     if (!semanticTag_.empty()) {
-      ImGui::Text("Semantic %s", semanticTag_.c_str());
+      Cr::Utility::formatInto(text, text.size(), "Semantic {}\n", semanticTag_);
     }
-    ImGui::End();
+
+    fontText_->render(text);
+
+    /* Set up renderer state for text rendering, and then reset that back again
+      after */
+    Mn::GL::Renderer::disable(Mn::GL::Renderer::Feature::DepthTest);
+    Mn::GL::Renderer::disable(Mn::GL::Renderer::Feature::FaceCulling);
+    Mn::GL::Renderer::enable(Mn::GL::Renderer::Feature::Blending);
+    Mn::GL::Renderer::setBlendFunction(
+        Mn::GL::Renderer::BlendFunction::One,
+        Mn::GL::Renderer::BlendFunction::OneMinusSourceAlpha);
+    Mn::GL::Renderer::setBlendEquation(Mn::GL::Renderer::BlendEquation::Add,
+                                       Mn::GL::Renderer::BlendEquation::Add);
+
+    fontShader_
+        .setTransformationProjectionMatrix(
+            Mn::Matrix3::projection(Mn::Vector2{windowSize()}) *
+            Mn::Matrix3::translation(Mn::Vector2{windowSize()} *
+                                         Mn::Vector2{-0.5f, 0.5f} +
+                                     Mn::Vector2{32, -32}))
+        .bindVectorTexture(fontGlyphCache_->texture())
+        .draw(fontText_->mesh());
+
+    Mn::GL::Renderer::enable(Mn::GL::Renderer::Feature::DepthTest);
+    Mn::GL::Renderer::enable(Mn::GL::Renderer::Feature::FaceCulling);
+    Mn::GL::Renderer::disable(Mn::GL::Renderer::Feature::Blending);
   }
-
-  /* Set appropriate states. If you only draw ImGui, it is sufficient to
-     just enable blending and scissor test in the constructor. */
-  Mn::GL::Renderer::enable(Mn::GL::Renderer::Feature::Blending);
-  Mn::GL::Renderer::enable(Mn::GL::Renderer::Feature::ScissorTest);
-  Mn::GL::Renderer::disable(Mn::GL::Renderer::Feature::FaceCulling);
-  Mn::GL::Renderer::disable(Mn::GL::Renderer::Feature::DepthTest);
-
-  imgui_.drawFrame();
-
-  /* Reset state. Only needed if you want to draw something else with
-     different state after. */
-
-  Mn::GL::Renderer::enable(Mn::GL::Renderer::Feature::DepthTest);
-  Mn::GL::Renderer::enable(Mn::GL::Renderer::Feature::FaceCulling);
-  Mn::GL::Renderer::disable(Mn::GL::Renderer::Feature::ScissorTest);
-  Mn::GL::Renderer::disable(Mn::GL::Renderer::Feature::Blending);
 
   swapBuffers();
   timeline_.nextFrame();
@@ -1917,9 +1847,6 @@ void Viewer::viewportEvent(ViewportEvent& event) {
   bindRenderTarget();
   Mn::GL::defaultFramebuffer.setViewport({{}, event.framebufferSize()});
 
-  imgui_.relayout(Mn::Vector2{event.windowSize()} / event.dpiScaling(),
-                  event.windowSize(), event.framebufferSize());
-
   objectPickingHelper_->handleViewportChange(event.framebufferSize());
 }
 
@@ -2011,15 +1938,6 @@ void Viewer::mousePressEvent(MouseEvent& event) {
         esp::physics::RaycastResults raycastResults = simulator_->castRay(ray);
 
         if (raycastResults.hasHits()) {
-          // If VHACD is enabled, and Ctrl + Right Click is used, voxelized
-          // the object clicked on.
-#ifdef ESP_BUILD_WITH_VHACD
-          if (event.modifiers() & MouseEvent::Modifier::Ctrl) {
-            auto objID = raycastResults.hits[0].objectId;
-            displayVoxelField(objID);
-            return;
-          }
-#endif
           addPrimitiveObject();
 
           auto existingObjectIDs = simulator_->getExistingObjectIDs();
@@ -2458,8 +2376,9 @@ void Viewer::keyPressEvent(KeyEvent& event) {
         // cache the file for quick-reload with SHIFT-T
         cachedURDF_ = urdfFilepath;
         auto aom = simulator_->getArticulatedObjectManager();
-        auto ao = aom->addArticulatedObjectFromURDF(urdfFilepath, fixedBase,
-                                                    1.0, 1.0, true);
+        auto ao = aom->addArticulatedObjectFromURDF(
+            urdfFilepath, fixedBase, 1.0, 1.0, true, false, false,
+            simConfig_.sceneLightSetupKey);
         ao->setTranslation(
             defaultAgent_->node().transformation().transformPoint(
                 {0, 1.0, -1.5}));
@@ -2482,21 +2401,6 @@ void Viewer::keyPressEvent(KeyEvent& event) {
     case KeyEvent::Key::V:
       invertGravity();
       break;
-    case KeyEvent::Key::K: {
-#ifdef ESP_BUILD_WITH_VHACD
-      iterateAndDisplaySignedDistanceField();
-      // Increase the distance visualized for next time (Pressing L
-      // repeatedly will visualize different distances)
-      voxelDistance++;
-#endif
-      break;
-    }
-    case KeyEvent::Key::G: {
-#ifdef ESP_BUILD_WITH_VHACD
-      displayStageDistanceGradientField();
-#endif
-      break;
-    }
     case KeyEvent::Key::F: {
 #ifdef ESP_BUILD_WITH_AUDIO
       // Add an audio source

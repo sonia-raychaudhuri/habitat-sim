@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -11,15 +11,21 @@
 
 #include "esp/core/Configuration.h"
 
+#include "esp/metadata/managers/AOAttributesManager.h"
 #include "esp/metadata/managers/AssetAttributesManager.h"
 #include "esp/metadata/managers/LightLayoutAttributesManager.h"
 #include "esp/metadata/managers/ObjectAttributesManager.h"
+#include "esp/metadata/managers/PbrShaderAttributesManager.h"
 #include "esp/metadata/managers/PhysicsAttributesManager.h"
 #include "esp/metadata/managers/SceneDatasetAttributesManager.h"
 #include "esp/metadata/managers/StageAttributesManager.h"
 #include "esp/sim/SimulatorConfiguration.h"
 
 namespace esp {
+
+namespace core {
+class Configuration;
+}
 
 namespace sim {
 struct SimulatorConfiguration;
@@ -52,25 +58,37 @@ class MetadataMediator {
   /**
    * @brief Creates a dataset attributes using @p sceneDatasetName, and
    * registers it. NOTE If an existing dataset attributes exists with this
-   * handle, then this will exit with a message unless @p overwrite is true.
+   * handle, then this will only overwrite this existing dataset if @p overwrite
+   * is set to true.
    * @param sceneDatasetName The name of the dataset to load or create.
    * @param overwrite Whether to overwrite an existing dataset or not
-   * @return Whether successfully created a new dataset or not.
+   * @return Whether a dataset with @p sceneDatasetName exists (either new or
+   * pre-existing).
    */
   bool createSceneDataset(const std::string& sceneDatasetName,
                           bool overwrite = false);
 
   /**
-   * @brief Load a physics manager attributes defined by passed string file path
+   * @brief Load a @ref esp::metadata::attributes::PhysicsManagerAttributes
+   * defined by passed string file path.
    * @param _physicsManagerAttributesPath The path to look for the physics
    * config file.
-   * @return Whether successfully created a new physics manager attributes or
-   * not.
+   * @return Whether a @ref esp::metadata::attributes::PhysicsManagerAttributes
+   * exists based on the requested path, either new or pre-existing.
    */
   bool createPhysicsManagerAttributes(
       const std::string& _physicsManagerAttributesPath =
           ESP_DEFAULT_PHYSICS_CONFIG_REL_PATH);
 
+  /**
+   * @brief Load PBR/IBL shader configuration attributes defined by file at
+   * passed path.
+   * @param _pbrConfigPath The path to look for the PBR/IBL shader config file
+   * @return Whether successfully created a new PBR/IBL shader configuration
+   * attributes or not.
+   */
+  bool createPbrAttributes(const std::string& _pbrConfigPath =
+                               ESP_DEFAULT_PBRSHADER_CONFIG_REL_PATH);
   //==================== Accessors ======================//
 
   /**
@@ -91,25 +109,44 @@ class MetadataMediator {
   std::string getActiveSceneDatasetName() const { return activeSceneDataset_; }
 
   /**
-   * @brief Sets desired physics manager attributes handle.  Will load if does
-   * not exist.
-   * @param _physicsManagerAttributesPath The path to look for the physics
+   * @brief Sets desired @ref esp::metadata::attributes::PhysicsManagerAttributes
+   * handle.  Will load if does not exist.
+   * @param physicsManagerAttributesPath The path to look for the physics
    * config file.
    * @return whether successful or not
    */
   bool setCurrPhysicsAttributesHandle(
-      const std::string& _physicsManagerAttributesPath);
+      const std::string& physicsManagerAttributesPath);
   /**
-   * @brief Returns the name of the currently used physics manager attributes
+   * @brief Returns the name of the currently used
+   * @ref esp::metadata::attributes::PhysicsManagerAttributes
    */
-  std::string getCurrPhysicsAttributesHandle() {
+  std::string getCurrPhysicsAttributesHandle() const {
     return currPhysicsManagerAttributes_;
+  }
+
+  /**
+   * @brief Sets the handle of the desired default @ref esp::metadata::attributes::PbrShaderAttributes
+   * unless overridden in scene instances.  Will load if does not exist.
+   * @param pbrShaderAttributesPath The path to look for the physics
+   * config file.
+   * @return whether successful or not
+   */
+  bool setCurrDefaultPbrAttributesHandle(
+      const std::string& pbrShaderAttributesPath);
+  /**
+   * @brief Returns the name of the currently specified default
+   * @ref esp::metadata::attributes::PbrShaderAttributes.
+   * This can be overridden on a per-scene instance basis.
+   */
+  std::string getCurrDefaultPbrAttributesHandle() const {
+    return currDefaultPbrAttributesHandle_;
   }
 
   /**
    * @brief Return manager for construction and access to asset attributes for
    * current dataset.
-   * @return The current dataset's @ref managers::AssetAttributesManager::ptr,
+   * @return The current dataset's @ref esp::metadata::managers::AssetAttributesManager::ptr,
    * or nullptr if no current dataset.
    */
   const managers::AssetAttributesManager::ptr& getAssetAttributesManager() {
@@ -127,11 +164,19 @@ class MetadataMediator {
   getLightLayoutAttributesManager() {
     return getActiveDSAttribs()->getLightLayoutAttributesManager();
   }
-
+  /**
+   * @brief Return manager for construction and access to articulated object
+   * attributes for current dataset.
+   * @return The current dataset's @ref esp::metadata::managers::AOAttributesManager::ptr,
+   * or nullptr if no current dataset.
+   */
+  const managers::AOAttributesManager::ptr& getAOAttributesManager() {
+    return getActiveDSAttribs()->getAOAttributesManager();
+  }
   /**
    * @brief Return manager for construction and access to object attributes for
    * current dataset.
-   * @return The current dataset's @ref managers::ObjectAttributesManager::ptr,
+   * @return The current dataset's @ref esp::metadata::managers::ObjectAttributesManager::ptr,
    * or nullptr if no current dataset.
    */
   const managers::ObjectAttributesManager::ptr& getObjectAttributesManager() {
@@ -148,8 +193,16 @@ class MetadataMediator {
   }  // getPhysicsAttributesManager
 
   /**
-   * @brief Return manager for construction and access to scene instance
-   * attributes for current dataset.
+   * @brief Return manager for PBR and IBL lighting configuration settings.
+   */
+  const managers::PbrShaderAttributesManager::ptr&
+  getPbrShaderAttributesManager() const {
+    return pbrShaderAttributesManager_;
+  }  // getPbrShaderAttributesManager
+
+  /**
+   * @brief Return manager for construction and access to
+   * @ref esp::attributes::SceneInstanceAttributes for current dataset.
    * @return The current dataset's @ref
    * managers::SceneInstanceAttributesManager::ptr, or nullptr if no current
    * dataset.
@@ -162,7 +215,7 @@ class MetadataMediator {
   /**
    * @brief Return manager for construction and access to stage attributes for
    * current dataset.
-   * @return The current dataset's @ref managers::StageAttributesManager::ptr,
+   * @return The current dataset's @ref esp::metadata::managers::StageAttributesManager::ptr,
    * or nullptr if no current dataset.
    */
   const managers::StageAttributesManager::ptr& getStageAttributesManager() {
@@ -170,13 +223,23 @@ class MetadataMediator {
   }  // MetadataMediator::getStageAttributesManager
 
   /**
-   * @brief Return a copy of the current physics manager attributes.
+   * @brief Return a copy of the current
+   * @ref esp::metadata::attributes::PhysicsManagerAttributes.
    */
   attributes::PhysicsManagerAttributes::ptr
   getCurrentPhysicsManagerAttributes() {
     return physicsAttributesManager_->getObjectCopyByHandle(
         currPhysicsManagerAttributes_);
   }  // getCurrentPhysicsManagerAttributes
+
+  /**
+   * @brief Return a copy of the currently specified PBR/IBL Shader
+   * configuration attributes.
+   */
+  attributes::PbrShaderAttributes::ptr getCurrentPbrConfiguration() {
+    return pbrShaderAttributesManager_->getObjectCopyByHandle(
+        currDefaultPbrAttributesHandle_);
+  }
 
   /**
    * @brief Get a list of all scene instances available in the currently active
@@ -245,10 +308,12 @@ class MetadataMediator {
   }  // MetadataMediator::getNavMeshPathByHandle
 
   /**
-   * @brief Returns an appropriate scene instance attributes corresponding to
-   * the passed sceneID/name.  For back-compat, this function needs to manage
-   * various conditions pertaining to the passed name.  It will always return a
-   * valid SceneInstanceAttributes for the current active dataset.
+   * @brief Returns an appropriate @ref esp::metadata::attributes::SceneInstanceAttributes
+   * corresponding to the passed sceneID/name.  For back-compat, this function
+   * needs to manage various conditions pertaining to the passed name.  It will
+   * always return a valid SceneInstanceAttributes for the current active
+   * dataset.
+   *
    * @param sceneName A string representation of the desired
    * SceneInstanceAttributes.  May only correspond to a stage on disk, in which
    * case a new SceneInstanceAttributes will be constructed and properly
@@ -350,12 +415,12 @@ class MetadataMediator {
   }  // getArticulatedObjModelFullHandle
 
   /**
-   * @brief TEMPORARY get a constant reference to the articulated object model
-   * filenames (.urdf) that have been loaded.  Once ArticulatedModelMangaer is
-   * built, this will be accomplished using Managed Container functionality.
+   * @brief This is to be deprecated. Provide a map of the articulated object
+   * model filenames (.urdf) that have been referenced in the Scene Dataset via
+   * paths, either .urdf or .json. To be removed in favor of directly accessing
+   * these values through the AOAttributesMaanager.
    */
-  const std::map<std::string, std::string>&
-  getArticulatedObjectModelFilenames() {
+  std::map<std::string, std::string> getArticulatedObjectModelFilenames() {
     return getActiveDSAttribs()->getArticulatedObjectModelFilenames();
   }
 
@@ -375,18 +440,20 @@ class MetadataMediator {
   /**
    * @brief Allow removal of the named @ref
    * esp::metadata::attributes::SceneDatasetAttributes.  Will silently force
-   * removal of locked attributes.  If @p datasetName references @ref
+   * removal of locked attributes. If @p datasetName references @ref
    * activeSceneDataset_ then will fail, returning false.
    *
-   * @param sceneDatasetName The name of the SceneDatasetAttributes to remove.
+   * @param sceneDatasetName The name of the @ref esp::metadata::attributes::SceneDatasetAttributes
+   * to remove.
    * @return whether successful or not.
    */
   bool removeSceneDataset(const std::string& sceneDatasetName);
 
   /**
    * @brief Checks if passed handle exists as scene dataset.
-   * @param sceneDatasetName The name of the SceneDatasetAttributes to remove.
-   * @return whether successful or not.
+   * @param sceneDatasetName The name of the @ref esp::metadata::attributes::SceneDatasetAttributes
+   * to check for.
+   * @return whether @ref esp::metadata::attributes::SceneDatasetAttributes exists.
    */
   inline bool sceneDatasetExists(const std::string& sceneDatasetName) const {
     return sceneDatasetAttributesManager_->getObjectLibHasHandle(
@@ -395,7 +462,7 @@ class MetadataMediator {
 
   /**
    * @brief Returns the createRenderer flag that was set in the associated
-   * SimulatorConfiguration.
+   * @ref esp::sim::SimulatorConfiguration.
    * @return the boolean flag.
    */
   bool getCreateRenderer() const { return simConfig_.createRenderer; }
@@ -417,6 +484,80 @@ class MetadataMediator {
    */
   std::string createDatasetReport(const std::string& sceneDataset = "") const;
 
+  /**
+   * @brief Return the root-level user defined attributes configuration for the
+   * specified scene instance.
+   * @param sceneName The scene name in the currently loaded SceneDataset.
+   * @return The scene instance user-defined configuration.
+   */
+  std::shared_ptr<esp::core::config::Configuration>
+  getSceneInstanceUserConfiguration(const std::string& curSceneName);
+
+  /**
+   * @brief Retrieve copies of all the @ref esp::metadata::attributes::PbrShaderAttributes
+   * currently defined. These will be used to pre-load/pre-derive any BLUTs and
+   * IBL cubemaps used once on dataset load.
+   */
+  std::unordered_map<std::string,
+                     esp::metadata::attributes::PbrShaderAttributes::ptr>
+  getAllPbrShaderConfigs() const {
+    return pbrShaderAttributesManager_->getObjectsByHandleSubstring("");
+  }
+
+  /**
+   * @brief Retrieve a copy of the named @ref esp::metadata::attributes::PbrShaderAttributes.
+   * @param handle the name of the config we wish to retrieve, or the default if
+   * not found
+   */
+  esp::metadata::attributes::PbrShaderAttributes::ptr getPbrShaderConfig(
+      const std::string& handle) const {
+    auto results =
+        pbrShaderAttributesManager_->getObjectsByHandleSubstring(handle);
+    if (results.size() > 0) {
+      return results.begin()->second;
+    } else {
+      ESP_WARNING() << "\t WARNING! No config for key :" << handle
+                    << "so returning default";
+      return getDefaultPbrShaderConfig();
+    }
+  }
+
+  esp::metadata::attributes::PbrShaderAttributes::ptr
+  getPbrShaderConfigByRegion(const std::string& region) {
+    std::string pbrConfigHandle =
+        getActiveDSAttribs()->getCurrPbrShaderHandleFromRegion(region);
+    return getPbrShaderConfig(pbrConfigHandle);
+  }
+
+  /**
+   * @brief Set the current scene's mapping from 'region' tags to
+   * PbrShaderAttributes handles.
+   */
+  void setCurrScenePbrShaderRegionMap(
+      std::map<std::string, std::string> mappings) {
+    getActiveDSAttribs()->setCurrScenePbrShaderAttrMappings(
+        std::move(mappings));
+  }
+
+  /**
+   * @brief Retrieve a copy of the named @ref esp::metadata::attributes::PbrShaderAttributes.
+   * @param handle the name of the config we wish to retrieve.
+   */
+  esp::metadata::attributes::PbrShaderAttributes::ptr
+  getDefaultPbrShaderConfig() const {
+    return pbrShaderAttributesManager_
+        ->getObjectsByHandleSubstring(currDefaultPbrAttributesHandle_)
+        .at(currDefaultPbrAttributesHandle_);
+  }
+
+  /**
+   * @brief This will set the IBL state for every configuration in the current
+   * pbrShaderAttributesManager_.
+   */
+  void setAllPbrShaderConfigIBLState(bool isIblEnabled) {
+    pbrShaderAttributesManager_->setAllIBLEnabled(isIblEnabled);
+  }
+
  protected:
   /**
    * @brief Return the file path corresponding to the passed handle in the
@@ -433,22 +574,25 @@ class MetadataMediator {
       const std::string& msgString);
 
   /**
-   * @brief This will create a new, empty @ref SceneInstanceAttributes with the
-   * passed name, and create a SceneObjectInstance for the stage also using the
-   * passed name. It is assuming that the dataset has the stage registered, and
-   * that the calling function will register the created SceneInstance with the
-   * dataset.  This method will also register navmesh and scene descriptor file
-   * paths that are synthesized for newly made SceneInstanceAttributes. TODO:
-   * get rid of these fields in stageAttributes.
+   * @brief This will create a new, empty @ref esp::metadata::attributes::SceneInstanceAttributes
+   * with the passed name, and create a SceneObjectInstance for the stage also
+   * using the passed name. It is assuming that the dataset has the stage
+   * registered, and that the calling function will register the created
+   * SceneInstance with the dataset.  This method will also register navmesh
+   * and scene descriptor file paths that are synthesized for newly made
+   * SceneInstanceAttributes. TODO: get rid of these fields in
+   * stageAttributes.
    *
    * @param datasetAttr The current dataset attributes
-   * @param stageAttributes Readonly version of stage to use to synthesize scene
-   * instance.
-   * @param dsSceneAttrMgr The current dataset's SceneInstanceAttributesManager
+   * @param stageAttributes Readonly version of stage to use to synthesize
+   * scene instance.
+   * @param dsSceneAttrMgr The current dataset's
+   * SceneInstanceAttributesManager
    * @param sceneName The name for the scene and also the stage within the
    * scene.
    * @return The created SceneInstanceAttributes, with the stage's
-   * SceneInstanceObject to be intialized to reference the stage also named with
+   * SceneInstanceObject to be intialized to reference the stage also named
+   * with
    * @p sceneName .
    */
   attributes::SceneInstanceAttributes::ptr makeSceneAndReferenceStage(
@@ -458,8 +602,8 @@ class MetadataMediator {
       const std::string& sceneName);
 
   /**
-   * @brief This function will build the @ref managers::PhysicsAttributesManager
-   * and @ref managers::SceneDatasetAttributesManager this mediator will manage.
+   * @brief This function will build the @ref esp::metadata::managers::PhysicsAttributesManager
+   * and @ref esp::metadata::managers::SceneDatasetAttributesManager this mediator will manage.
    * This should only be called from constructor or reset (TODO).
    */
   void buildAttributesManagers();
@@ -472,12 +616,14 @@ class MetadataMediator {
     // do not get copy of dataset attributes
     auto datasetAttr =
         sceneDatasetAttributesManager_->getObjectByHandle(activeSceneDataset_);
-    // this should never happen - there will always be a dataset with the name
-    // activeSceneDataset_
+    // this should never happen - there should always be a dataset with the
+    // name activeSceneDataset_
     if (datasetAttr == nullptr) {
-      ESP_ERROR() << "Unable to set active dataset due to Unknown dataset named"
-                  << activeSceneDataset_
-                  << "so changing dataset to \"default\".";
+      ESP_ERROR(Mn::Debug::Flag::NoSpace)
+          << "Unable to set active Scene Dataset due to unknown dataset "
+             "named `"
+          << activeSceneDataset_
+          << "` so changing Scene Dataset  to `default`.";
       activeSceneDataset_ = "default";
 
       datasetAttr = sceneDatasetAttributesManager_->getObjectByHandle(
@@ -498,12 +644,22 @@ class MetadataMediator {
    * @brief String name of current, default dataset.
    */
   std::string activeSceneDataset_;
+
   /**
-   * @brief String name of current Physis Manager attributes
+   * @brief String name of current Physics Manager attributes
    */
   std::string currPhysicsManagerAttributes_;
+
   /**
-   * @brief Manages all construction and access to all scene dataset attributes.
+   * @brief String name of current default PBR/IBL Shader configuration
+   * attributes.
+   */
+  std::string currDefaultPbrAttributesHandle_;
+  /**
+   * @brief Manages all construction and access to all scene dataset
+   * attributes. Users should never directly access this, or it could
+   * inadvertently get in a broken and unrecoverable state.  All access to
+   * SceneDatasetAttributes should be currated/governed by MetadataMediator.
    */
   managers::SceneDatasetAttributesManager::ptr sceneDatasetAttributesManager_ =
       nullptr;
@@ -512,6 +668,13 @@ class MetadataMediator {
    * @brief Manages all construction and access to physics world attributes.
    */
   managers::PhysicsAttributesManager::ptr physicsAttributesManager_ = nullptr;
+
+  /**
+   * @brief Manages all PBR/IBL Shader configuration settings, independent of
+   * loaded datasets.
+   */
+  managers::PbrShaderAttributesManager::ptr pbrShaderAttributesManager_ =
+      nullptr;
 
  public:
   ESP_SMART_POINTERS(MetadataMediator)

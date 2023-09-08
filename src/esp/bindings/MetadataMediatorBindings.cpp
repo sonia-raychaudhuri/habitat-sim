@@ -1,5 +1,4 @@
-
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -16,7 +15,9 @@ namespace esp {
 namespace metadata {
 
 void initMetadataMediatorBindings(py::module& m) {
-  py::class_<MetadataMediator, MetadataMediator::ptr>(m, "MetadataMediator")
+  py::class_<MetadataMediator, MetadataMediator::ptr>(
+      m, "MetadataMediator",
+      R"(Aggregates all AttributesManagers and provides an API for swapping the active SceneDataset. It can exist independant of a :ref:`Simulator` object for programmatic metadata management and can be passed into the constructor via the :ref:`SimulatorConfiguration`.)")
       .def(py::init(&MetadataMediator::create<>))
       .def(py::init<const sim::SimulatorConfiguration&>())
       .def_property(
@@ -35,6 +36,11 @@ void initMetadataMediatorBindings(py::module& m) {
           R"(Remove the given dataset from MetadataMediator.  If specified dataset is currently active, this will fail.)",
           "dataset_name"_a)
       /* --- Template Manager accessors --- */
+      .def_property_readonly(
+          "ao_template_manager", &MetadataMediator::getAOAttributesManager,
+          pybind11::return_value_policy::reference,
+          R"(The current dataset's AOAttributesManager instance
+            for configuring articulated object templates.)")
       .def_property_readonly(
           "asset_template_manager",
           &MetadataMediator::getAssetAttributesManager,
@@ -71,6 +77,11 @@ void initMetadataMediatorBindings(py::module& m) {
       .def(
           "get_scene_handles", &MetadataMediator::getAllSceneInstanceHandles,
           R"(Returns a list the names of all the available scene instances in the currently active dataset.)")
+      .def(
+          "get_scene_user_defined",
+          &MetadataMediator::getSceneInstanceUserConfiguration,
+          R"(Returns the user_defined attributes for the scene instance specified by scene_name)",
+          "scene_name"_a)
       .def_property_readonly(
           "summary", &MetadataMediator::getDatasetsOverview,
           R"(This provides a summary of the datasets currently loaded.)")

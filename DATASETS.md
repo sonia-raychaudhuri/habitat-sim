@@ -1,4 +1,38 @@
-# Datasets commonly used with Habitat-Sim
+# HowTo Use Common Supported Datasets with Habitat-Sim
+
+🤗 View the open-source collection of Habitat-ready datasets and test assets on Hugging Face at https://huggingface.co/ai-habitat!
+
+## Table of contents
+   1. [Habitat test scenes](#habitat-test-scenes)
+   1. [Habitat-Matterport 3D Research Dataset (HM3D)](#habitat-matterport-3d-research-dataset-hm3d)
+   1. [Habitat Synthetic Scenes Dataset (HSSD)](#habitat-synthetic-scene-dataset-hssd)
+   1. [AI2-THOR (Habitat)](#ai2-thor-habitat)
+   1. [Matterport3D (MP3D) dataset](#matterport3d-mp3d-dataset)
+   1. [Gibson and 3DSceneGraph datasets](#gibson-and-3dscenegraph-datasets)
+   1. [Replica Dataset](#replica-dataset)
+   1. [ReplicaCAD](#replicacad)
+   1. [ScanNet](#scannet)
+   1. [YCB Benchmarks - Object and Model Set](#ycb-benchmarks---object-and-model-set)
+   1. [Previewing dataset assets using Habitat-Sim's viewers](#previewing-dataset-assets-using-habitat-sims-viewers)
+
+___
+
+## Habitat test scenes
+[🤗 Browse on Hugging Face 🤗](https://huggingface.co/datasets/ai-habitat/habitat_test_scenes)
+
+We provide 3 example scenes for performing unit tests in habitat-sim. These can be programmatically downloaded via Habitat's data download utility.
+
+```
+python -m habitat_sim.utils.datasets_download --uids habitat_test_scenes --data-path data/
+```
+
+We also provide PointNav episodes sampled from these scenes for performing unit tests in habitat-lab. These can also be downloaded using Habitat's data download utility.
+
+```
+python -m habitat_sim.utils.datasets_download --uids habitat_test_pointnav_dataset --data-path data/
+```
+
+___
 
 ## Habitat-Matterport 3D Research Dataset (HM3D)
 
@@ -23,13 +57,13 @@ First, you will need to generate a matterport API Token:
 
 Now, you are ready to download. For example, to download the minival split, use:
 ```
-python -m habitat_sim.utils.datasets_download --username <api-token-id> --password <api-token-secret> --uids hm3d_minival
+python -m habitat_sim.utils.datasets_download --username <api-token-id> --password <api-token-secret> --uids hm3d_minival_v0.2
 ```
 
-By default, downloading the data for train/val/example scenes also pulls in the semantic annotations and configs for [HM3D-Semantics v0.1](https://aihabitat.org/datasets/hm3d-semantics/). To download only the semantic files for these splits, use the uid `hm3d_semantics`.
+By default, downloading the data for train/val/example scenes also pulls in the semantic annotations and configs for [HM3D-Semantics v0.2](https://aihabitat.org/datasets/hm3d-semantics/). To download only the semantic files for these splits, use the uid `hm3d_semantics`.
 
 
-By default the download script will only download what is needed for Habitat-Sim.  You can add `_full` to the uid to download the raw glbs and the obj+mtl's in addition to what is needed for use with Habitat-Sim.
+By default the download script will only download what is needed for Habitat-Sim. You can add `_full` to the uid to download the raw glbs in addition to what is needed for use with Habitat-Sim.
 
 ### Loading semantics for HM3D
 
@@ -100,25 +134,56 @@ To load semantic annotations in habitat-lab:
 
 Note that if you are using the RL environment from habitat-lab, `SIMULATOR.SCENE_DATASET` is overridden by the episode dataset (see [here](https://github.com/facebookresearch/habitat-lab/blob/e934b15c35233457cc3cb9c90ba0e207610dbd19/habitat/core/env.py#L94-L96)). Each episode in the episode dataset must point to the annotation config file (as done in the HM3D ObjectNav dataset [here](https://github.com/facebookresearch/habitat-lab)).
 
+___
+
+## Habitat Synthetic Scene Dataset (HSSD)
+
+Details: [https://3dlg-hcvc.github.io/hssd/](https://3dlg-hcvc.github.io/hssd/).
+
+You can browse and download the HSSD dataset from instructions provided in the above website.
+
+For quick setup and use with habitat-sim and habitat-lab, register for access [on the huggingface hssd-hab repo page](https://huggingface.co/datasets/hssd/hssd-hab) and then use the `datasets_download.py` script as follows:
+
+```
+python -m habitat_sim.utils.datasets_download --username <huggingface-username> --password <huggingface-password> --uids hssd-hab --data-path data/
+```
+
+___
+
+## AI2-THOR (Habitat)
+
+Details: [https://3dlg-hcvc.github.io/hssd/](https://3dlg-hcvc.github.io/hssd/).
+
+You can download Habitat-compatible versions of the iTHOR, RoboTHOR, and ProcTHOR scene datasets from instructions provided in the above website.
+
+___
 
 ## Matterport3D (MP3D) dataset
 
-Details: [https://niessner.github.io/Matterport/](https://niessner.github.io/Matterport/).
 
+Details: [https://niessner.github.io/Matterport/](https://niessner.github.io/Matterport/).
 Github: [https://github.com/niessner/Matterport](https://github.com/niessner/Matterport)
 
-MP3D dataset for use with Habitat can be downloaded using the official [Matterport3D](https://niessner.github.io/Matterport/) download script as follows: `python download_mp.py --task habitat -o path/to/download/`.
-Note that this download script requires python 2.7 to run.
+We provide 1 example scene from MP3D for performing unit tests in habitat-sim. This can be programmatically downloaded via Habitat's data download utility.
+
+```
+python -m habitat_sim.utils.datasets_download --uids mp3d_example_scene --data-path data/
+```
+
+
+The full MP3D dataset for use with Habitat can be downloaded using the official [Matterport3D](https://niessner.github.io/Matterport/) download script as follows: `python download_mp.py --task habitat -o path/to/download/`. Note that this download script requires python 2.7 to run.
 
 You only need the habitat zip archive and not the entire Matterport3D dataset.
 
 Once you have the habitat zip archive, you should download [this SceneDatasetConfig file](http://dl.fbaipublicfiles.com/habitat/mp3d/config_v1/mp3d.scene_dataset_config.json) and place it in the root directory for the Matterport3D dataset (e.g. Habitat-Sim/data/scene_datasets/mp3d/). This file should then be specified as [the scene dataset config in the SimulatorConfiguration structure](/examples/tutorials/nb_python/ReplicaCAD_quickstart.py#L145) like this example for the ReplicaCAD dataset.
 
+___
+
 ## Gibson and 3DSceneGraph datasets
 
-- The Gibson dataset for use with Habitat can be downloaded by agreeing to the terms of use in the [Gibson](https://github.com/StanfordVL/GibsonEnv#database) repository.
+The Gibson dataset for use with Habitat can be downloaded by agreeing to the terms of use in the [Gibson](https://github.com/StanfordVL/GibsonEnv#database) repository.
 
-- Semantic information for Gibson is available from the [3DSceneGraph](https://3dscenegraph.stanford.edu/) dataset. The semantic data will need to be converted before it can be used within Habitat:
+Semantic information for Gibson is available from the [3DSceneGraph](https://3dscenegraph.stanford.edu/) dataset. The semantic data will need to be converted before it can be used within Habitat:
    ```bash
    tools/gen_gibson_semantics.sh /path/to/3DSceneGraph_medium/automated_graph /path/to/GibsonDataset /path/to/output
    ```
@@ -126,13 +191,20 @@ Once you have the habitat zip archive, you should download [this SceneDatasetCon
 
    Once you have downloaded the Gibson dataset and converted the semantic data, you should download [this SceneDatasetConfig file](http://dl.fbaipublicfiles.com/habitat/gibson/config_v1/gibson_semantic.scene_dataset_config.json) and place it in the root directory for the Gibson dataset (e.g. Habitat-Sim/data/scene_datasets/gibson/). This file should then be specified as [the scene dataset config in the SimulatorConfiguration structure](/examples/tutorials/nb_python/ReplicaCAD_quickstart.py#L145) like this example for the ReplicaCAD dataset.
 
+___
+
 ## Replica Dataset
 
 Details and download isntructions: [https://github.com/facebookresearch/Replica-Dataset](https://github.com/facebookresearch/Replica-Dataset).
 
-## ReplicaCAD
+___
 
-Details and download instructions: [https://aihabitat.org/datasets/replica_cad/](https://aihabitat.org/datasets/replica_cad/).
+## ReplicaCAD
+🤗 Browse on Hugging Face ([interactive](https://huggingface.co/datasets/ai-habitat/ReplicaCAD_dataset), [baked_lighting](https://huggingface.co/datasets/ai-habitat/ReplicaCAD_baked_lighting)) 🤗
+
+Details and instructions: [https://aihabitat.org/datasets/replica_cad/](https://aihabitat.org/datasets/replica_cad/).
+
+___
 
 ## ScanNet
 
@@ -146,12 +218,14 @@ The exported `*.glb` files can directly be used with Habitat-Sim versions >= 2.0
 
 Note: Depending on the configured radius and height of the agent, certain scans may have no navigable locations on the navmesh (~200). These scenes can be filtered out by checking if `sim.pathfinder.is_loaded` is False.
 
+___
+
 ## YCB Benchmarks - Object and Model Set
+[🤗 Browse Habitat-ready asset dataset on Hugging Face 🤗](https://huggingface.co/datasets/ai-habitat/ycb)
+
 Details: [https://www.ycbbenchmarks.com/](https://www.ycbbenchmarks.com/).
 
 > YCB Object and Model Set is designed for facilitating benchmarking in robotic manipulation... The set is associated with a [model database](http://www.ycbbenchmarks.com/object-models/) which provides mesh models and high-resolution RGB-D scans of the objects for easy incorporation into manipulation and planning software platforms.
-
-Pre-processed, [Habitat-ready assets](https://dl.fbaipublicfiles.com/habitat/ycb/hab_ycb_v1.2.zip).
 
 Quick-start with the dataset_downloader utility:
 
@@ -179,9 +253,11 @@ To quickly test in the viewer application:
 #from the habitat-sim directory
 # C++
 # ./build/viewer if compiling locally
-habitat-viewer --stage-requires-lighting --enable-physics --object-dir ""  --dataset data/objects/ycb/ycb.scene_dataset_config.json -- data/test_assets/scenes/simple_room.glb
+habitat-viewer --use-default-lighting --enable-physics --object-dir ""  --dataset data/objects/ycb/ycb.scene_dataset_config.json -- data/test_assets/scenes/simple_room.glb
 ```
 Then press `'o'` key to add random objects from the dataset.
+
+___
 
 # Previewing dataset assets using  Habitat-Sim's viewers
 

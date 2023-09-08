@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -63,12 +63,12 @@ def quat_to_angle_axis(quat: qt.quaternion) -> Tuple[float, np.ndarray]:
     :return:
         -   `float` --- The angle to rotate about the axis by
         -   `numpy.ndarray` --- The axis to rotate about. If :math:`\theta = 0`,
-            then this is harded coded to be the +x axis
+            then this is hardcoded to be the +x axis
     """
 
     rot_vec = qt.as_rotation_vector(quat)
 
-    theta = np.linalg.norm(rot_vec)
+    theta = float(np.linalg.norm(rot_vec))
     if np.abs(theta) < 1e-5:
         w = np.array([1, 0, 0])
         theta = 0.0

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -16,9 +16,6 @@ AssetInfo AssetInfo::fromPath(const std::string& path) {
 
   if (endsWith(path, "_semantic.ply")) {
     info.type = AssetType::INSTANCE_MESH;
-  } else if (endsWith(path, "mesh.ply")) {
-    info.type = AssetType::FRL_PTEX_MESH;
-    info.frame = geo::CoordinateFrame(geo::ESP_BACK, geo::ESP_UP);
   } else if (endsWith(path, ".glb")) {
     // assumes MP3D glb with gravity = -Z
     info.type = AssetType::MP3D_MESH;

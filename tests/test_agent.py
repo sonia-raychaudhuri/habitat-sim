@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -23,15 +23,15 @@ def test_reconfigure():
     agent = habitat_sim.Agent(scene_graph.get_root_node().create_child())
 
     habitat_sim.errors.assert_obj_valid(agent.body)
-    for _, v in agent._sensors.items():
+    for v in agent._sensors.values():
         habitat_sim.errors.assert_obj_valid(v)
 
     agent.reconfigure(agent.agent_config)
-    for _, v in agent._sensors.items():
+    for v in agent._sensors.values():
         habitat_sim.errors.assert_obj_valid(v)
 
     agent.reconfigure(agent.agent_config, True)
-    for _, v in agent._sensors.items():
+    for v in agent._sensors.values():
         habitat_sim.errors.assert_obj_valid(v)
 
 

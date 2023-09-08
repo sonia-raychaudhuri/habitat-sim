@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree
 
@@ -19,7 +19,7 @@
 // compiled into static library, it must be explicitly initialized via this
 // macro, and should be called *outside* of any namespace.
 static void importShaderResources() {
-  CORRADE_RESOURCE_INITIALIZE(ShaderResources)
+  CORRADE_RESOURCE_INITIALIZE(GfxShaderResources)
 }
 
 namespace Mn = Magnum;
@@ -33,19 +33,19 @@ enum {
 };
 
 PbrEquiRectangularToCubeMapShader::PbrEquiRectangularToCubeMapShader() {
-  if (!Corrade::Utility::Resource::hasGroup("default-shaders")) {
+  if (!Corrade::Utility::Resource::hasGroup("gfx-shaders")) {
     importShaderResources();
   }
 
 #ifdef MAGNUM_TARGET_WEBGL
   Mn::GL::Version glVersion = Mn::GL::Version::GLES300;
 #else
-  Mn::GL::Version glVersion = Mn::GL::Version::GL410;
+  Mn::GL::Version glVersion = Mn::GL::Version::GL330;
 #endif
 
   // this is not the file name, but the group name in the config file
   // see Shaders.conf in the shaders folder
-  const Cr::Utility::Resource rs{"default-shaders"};
+  const Cr::Utility::Resource rs{"gfx-shaders"};
 
   Mn::GL::Shader vert{glVersion, Mn::GL::Shader::Type::Vertex};
   Mn::GL::Shader frag{glVersion, Mn::GL::Shader::Type::Fragment};
@@ -59,18 +59,18 @@ PbrEquiRectangularToCubeMapShader::PbrEquiRectangularToCubeMapShader() {
           "#define OUTPUT_ATTRIBUTE_LOCATION_COLOR {}\n", ColorOutput))
       .addSource(rs.getString("equirectangularToCubeMap.frag"));
 
-  CORRADE_INTERNAL_ASSERT_OUTPUT(Mn::GL::Shader::compile({vert, frag}));
+  CORRADE_INTERNAL_ASSERT_OUTPUT(vert.compile() && frag.compile());
 
   attachShaders({vert, frag});
 
   CORRADE_INTERNAL_ASSERT_OUTPUT(link());
 
   // setup texture binding point
-  setUniform(uniformLocation("EquirectangularTexture"),
+  setUniform(uniformLocation("uEquirectangularTexture"),
              EquirectangularTextureUnit);
 
   // setup uniforms
-  cubeSideIndexUniform_ = uniformLocation("CubeSideIndex");
+  cubeSideIndexUniform_ = uniformLocation("uCubeSideIndex");
 }
 
 PbrEquiRectangularToCubeMapShader&

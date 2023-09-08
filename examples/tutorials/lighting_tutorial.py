@@ -1,3 +1,7 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 # [setup]
 import math
 import os
@@ -56,7 +60,6 @@ def make_configuration():
     # simulator configuration
     backend_cfg = habitat_sim.SimulatorConfiguration()
     backend_cfg.scene_id = "data/scene_datasets/habitat-test-scenes/van-gogh-room.glb"
-    backend_cfg.enable_physics = True
 
     # agent configuration
     sensor_cfg = habitat_sim.CameraSensorSpec()
@@ -68,6 +71,7 @@ def make_configuration():
 
 
 # [/setup]
+
 
 # This is wrapped such that it can be added to a unit test
 def main(show_imgs=True, save_imgs=False):
@@ -144,7 +148,7 @@ def main(show_imgs=True, save_imgs=False):
 
     # create a custom light setup
     my_default_lighting = [
-        LightInfo(vector=[2.0, 2.0, 1.0, 0.0], model=LightPositionModel.Camera)
+        LightInfo(vector=[-2.0, -2.0, -1.0, 0.0], model=LightPositionModel.Camera)
     ]
     # overwrite the default DEFAULT_LIGHTING_KEY light setup
     sim.set_light_setup(my_default_lighting)
@@ -203,7 +207,7 @@ def main(show_imgs=True, save_imgs=False):
     # create a new setup with an additional light
     new_light_setup = existing_light_setup + [
         LightInfo(
-            vector=[0.0, 0.0, 1.0, 0.0],
+            vector=[0.0, 0.0, -1.0, 0.0],
             color=[1.6, 1.6, 1.4],
             model=LightPositionModel.Camera,
         )

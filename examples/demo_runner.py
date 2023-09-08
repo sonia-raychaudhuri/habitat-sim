@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -356,7 +356,6 @@ class DemoRunner:
 
         best_perf = None
         for _ in range(3):
-
             if _barrier is not None:
                 _barrier.wait()
                 if _idx == 0:
@@ -395,7 +394,7 @@ class DemoRunner:
         ) as pool:
             perfs = pool.map(self._bench_target, range(nprocs))
 
-        res = {k: [] for k in perfs[0].keys()}
+        res = {k: [] for k in perfs[0]}
         for p in perfs:
             for k, v in p.items():
                 res[k] += [v]

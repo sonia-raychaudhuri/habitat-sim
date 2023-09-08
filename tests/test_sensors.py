@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import importlib.util
@@ -16,8 +16,8 @@ import quaternion  # noqa: F401
 
 import habitat_sim
 import habitat_sim.errors
-from examples.settings import make_cfg
 from habitat_sim.utils.common import quat_from_coeffs
+from habitat_sim.utils.settings import make_cfg
 
 torch_spec = importlib.util.find_spec("torch")
 _HAS_TORCH = torch_spec is not None
@@ -53,7 +53,6 @@ def _render_scene(sim, scene, sensor_type, gpu2gpu):
 
 
 def _render_and_load_gt(sim, scene, sensor_type, gpu2gpu):
-
     obs = _render_scene(sim, scene, sensor_type, gpu2gpu)
 
     # now that sensors are constructed, test some getter/setters
@@ -277,7 +276,6 @@ def test_smoke_no_sensors(make_cfg_settings):
         if not osp.exists(scene):
             continue
         scene_dataset_config = scene_and_dataset[1]
-        make_cfg_settings = {k: v for k, v in make_cfg_settings.items()}
         make_cfg_settings["semantic_sensor"] = False
         make_cfg_settings["scene"] = scene
         make_cfg_settings["scene_dataset_config_file"] = scene_dataset_config

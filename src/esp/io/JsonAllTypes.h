@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -57,11 +57,14 @@ void addMember(rapidjson::Value& value,
 
 template <typename T>
 bool readMember(const rapidjson::Value& value, const char* tag, T& x) {
-  if (!value.HasMember(tag)) {
+  JsonGenericValue::ConstMemberIterator jsonIter = value.FindMember(tag);
+
+  if (jsonIter == value.MemberEnd()) {
     // return false but don't log an error
     return false;
   }
-  if (!fromJsonValue(value[tag], x)) {
+
+  if (!fromJsonValue(jsonIter->value, x)) {
     ESP_ERROR() << "Failed to parse JSON tag \"" << tag << "\"";
     return false;
   }

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -51,11 +51,20 @@ bool SemanticScene::
         // if not successful then attempt to load known json files
         const io::JsonDocument& jsonDoc = io::parseJsonFile(ssdFileName);
         // if no error thrown, then we have loaded a json file of given name
-        bool hasCorrectObjects =
-            (jsonDoc.HasMember("objects") && jsonDoc["objects"].IsArray());
+
+        io::JsonGenericValue::ConstMemberIterator hasJsonObjIter =
+            jsonDoc.FindMember("objects");
+
+        bool hasCorrectObjects = (hasJsonObjIter != jsonDoc.MemberEnd() &&
+                                  hasJsonObjIter->value.IsArray());
+
+        io::JsonGenericValue::ConstMemberIterator hasJsonClassIter =
+            jsonDoc.FindMember("classes");
+
         // check if also has "classes" tag, otherwise will assume it is a
         // gibson file
-        if (jsonDoc.HasMember("classes") && jsonDoc["classes"].IsArray()) {
+        if (hasJsonClassIter != jsonDoc.MemberEnd() &&
+            hasJsonClassIter->value.IsArray()) {
           // attempt to load replica or replicaCAD if has classes (replicaCAD
           // does not have objects in SSDescriptor)
           success =
@@ -182,7 +191,7 @@ SemanticScene::buildCCBasedSemanticObjs(
   std::unordered_map<uint32_t, uint32_t> mapColorIntsToSemanticObjIDXs;
   mapColorIntsToSemanticObjIDXs.reserve(semanticObjs.size());
   for (uint32_t i = 0; i < semanticObjs.size(); ++i) {
-    mapColorIntsToSemanticObjIDXs.insert({semanticObjs[i]->getColorAsInt(), i});
+    mapColorIntsToSemanticObjIDXs.emplace(semanticObjs[i]->getColorAsInt(), i);
   }
   // build map with key being semanticObject IDX in semantic Objects array
   std::unordered_map<uint32_t, std::vector<scene::CCSemanticObject::ptr>>

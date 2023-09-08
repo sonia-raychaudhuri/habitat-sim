@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -10,13 +10,15 @@
 
 #include "esp/core/Esp.h"
 
-#include "esp/gfx/DepthUnprojection.h"
 #include "esp/gfx/Renderer.h"
 
 namespace esp {
 
 namespace sensor {
 class VisualSensor;
+}
+namespace gfx_batch {
+class DepthShader;
 }
 
 namespace gfx {
@@ -70,7 +72,7 @@ class RenderTarget {
    */
   RenderTarget(const Magnum::Vector2i& size,
                const Magnum::Vector2& depthUnprojection,
-               DepthShader* depthShader,
+               gfx_batch::DepthShader* depthShader,
                Flags flags = {Flag::RgbaAttachment | Flag::ObjectIdAttachment |
                               Flag::DepthTextureAttachment},
                const sensor::VisualSensor* visualSensor = nullptr);
@@ -78,7 +80,7 @@ class RenderTarget {
   /**
    * @brief Constructor
    * @param size               The size of the underlying framebuffers in WxH
-   * @param depthUnprojection  Depth unrpojection parameters.  See @ref
+   * @param depthUnprojection  Depth unprojection parameters.  See @ref
    *                           calculateDepthUnprojection()
    * @param visualSensor       (optional) The visual sensor for this render
    * target
@@ -144,6 +146,13 @@ class RenderTarget {
    * Magnum::PixelFormat::R16UI
    */
   void readFrameObjectId(const Magnum::MutableImageView2D& view);
+
+  /**
+   * @brief Blits the rgba buffer from internal FBO to given framebuffer
+   * rectangle
+   */
+  void blitRgbaTo(Magnum::GL::AbstractFramebuffer& target,
+                  const Magnum::Range2Di& targetRectangle);
 
   /**
    * @brief Blits the rgba buffer from internal FBO to default frame buffer

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -11,7 +11,7 @@ import quaternion  # noqa: F401
 
 import habitat_sim
 import habitat_sim.errors
-from examples.settings import make_cfg
+from habitat_sim.utils.settings import make_cfg
 
 _test_scenes = [
     osp.abspath(
@@ -38,7 +38,6 @@ def test_semantic_scene(scene, make_cfg_settings):
     if not osp.exists(scene):
         pytest.skip("Skipping {}".format(scene))
 
-    make_cfg_settings = {k: v for k, v in make_cfg_settings.items()}
     make_cfg_settings["semantic_sensor"] = False
     make_cfg_settings["scene"] = scene
     cfg = make_cfg(make_cfg_settings)

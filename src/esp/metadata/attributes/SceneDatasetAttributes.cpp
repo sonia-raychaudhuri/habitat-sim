@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -16,12 +16,14 @@ SceneDatasetAttributes::SceneDatasetAttributes(
   assetAttributesManager_ = managers::AssetAttributesManager::create();
   lightLayoutAttributesManager_ =
       managers::LightLayoutAttributesManager::create();
+  artObjAttributesManager_ = managers::AOAttributesManager::create();
   objectAttributesManager_ = managers::ObjectAttributesManager::create();
   objectAttributesManager_->setAssetAttributesManager(assetAttributesManager_);
   sceneInstanceAttributesManager_ =
       managers::SceneInstanceAttributesManager::create();
-  stageAttributesManager_ = managers::StageAttributesManager::create(
-      objectAttributesManager_, physAttrMgr);
+  stageAttributesManager_ =
+      managers::StageAttributesManager::create(physAttrMgr);
+  stageAttributesManager_->setAssetAttributesManager(assetAttributesManager_);
 }  // ctor
 
 bool SceneDatasetAttributes::addNewSceneInstanceToDataset(
@@ -74,7 +76,7 @@ bool SceneDatasetAttributes::addNewSceneInstanceToDataset(
   // should only be empty if not specified in scene instance config, or if scene
   // instance config is synthesized (i.e. when Simulator::reconfigure is called
   // with SimulatorConfiguration::activeSceneName being a stage)
-  if (lightHandle.length() == 0) {
+  if (lightHandle.empty()) {
     lightHandle = sceneInstanceName;
   }
 
@@ -132,16 +134,15 @@ std::pair<std::string, std::string> SceneDatasetAttributes::addNewValToMap(
         } while (map.count(newKey) > 0);
         ESP_WARNING(Mn::Debug::Flag::NoSpace)
             << descString << " : Provided key '" << key
-
-            << "' already references a different value in "
-               "map. Modifying key to be"
+            << "' already references a different value in map. Modifying key "
+               "to be '"
             << newKey
-            << ". Set overwrite to true to overwrite existing entries.";
+            << "'. Set overwrite to true to overwrite existing entries.";
       } else {  // overwrite entry
-        ESP_WARNING() << descString
-                      << ": Warning : Overwriting existing map entry"
-                      << map.at(newKey) << "at key" << newKey << "with value"
-                      << path << ".";
+        ESP_WARNING(Mn::Debug::Flag::NoSpace)
+            << descString << " : Overwriting existing map entry "
+            << map.at(newKey) << " at key '" << newKey << "' with value'"
+            << path << "'.";
       }  // overwrite or not
     }    // found entry is desired or not
   }      // key is found
@@ -152,9 +153,8 @@ std::pair<std::string, std::string> SceneDatasetAttributes::addNewValToMap(
 esp::gfx::LightSetup SceneDatasetAttributes::getNamedLightSetup(
     const std::string& lightSetupName) {
   auto lightLayoutAttrName = getLightSetupFullHandle(lightSetupName);
-  if (lightLayoutAttrName == NO_LIGHT_KEY) {
-    return esp::gfx::LightSetup{};
-  }
+  // lightLayoutAttrName == NO_LIGHT_KEY and DEFAULT_LIGHTING_KEY
+  // handled in lightLayoutAttributesManager_
   return lightLayoutAttributesManager_->createLightSetupFromAttributes(
       lightLayoutAttrName);
 
@@ -236,7 +236,8 @@ std::string SceneDatasetAttributes::getObjectInfoInternal() const {
   // articulated objects
   Cr::Utility::formatInto(
       res, res.size(), "{}",
-      concatStrings("Articulated Object Models", articulatedObjPaths));
+      concatStrings("Articulated Object Templates",
+                    artObjAttributesManager_->getObjectInfoStrings()));
 
   // lights
   Cr::Utility::formatInto(
@@ -272,7 +273,8 @@ std::string SceneDatasetAttributes::getDatasetSummary() const {
       "{},{},{},{},{},{},{},{},{},", getSimplifiedHandle(),
       sceneInstanceAttributesManager_->getNumObjects(),
       stageAttributesManager_->getNumObjects(),
-      objectAttributesManager_->getNumObjects(), articulatedObjPaths.size(),
+      objectAttributesManager_->getNumObjects(),
+      artObjAttributesManager_->getNumObjects(),
       lightLayoutAttributesManager_->getNumObjects(),
       assetAttributesManager_->getNumObjects(), navmeshMap_.size(),
       semanticSceneDescrMap_.size());

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree
 
@@ -41,11 +41,6 @@ class CubeMap {
      */
     ObjectId,
 
-    /**
-     * Variance shadow map texture
-     */
-    VarianceShadowMap,
-
     // TODO: HDR color
 
     Count,
@@ -67,11 +62,6 @@ class CubeMap {
      */
     ObjectIdOutput = Magnum::Shaders::GenericGL3D::ObjectIdOutput,
 
-    /**
-     * Variance shadow map shader output
-     * Expects a two-component floating point (32F) attachment
-     */
-    VarianceShadowMapOutput = ObjectIdOutput + 1u,
   };
 
   enum class Flag : Magnum::UnsignedShort {
@@ -105,10 +95,6 @@ class CubeMap {
      */
     ManuallyBuildMipmap = 1 << 4,
 
-    /**
-     * create variance shadow map
-     */
-    VarianceShadowMapTexture = 1 << 5,
   };
 
   /**

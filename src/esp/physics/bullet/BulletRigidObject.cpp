@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -16,6 +16,8 @@
 #include "BulletCollision/NarrowPhaseCollision/btRaycastCallback.h"
 #include "BulletCollisionHelper.h"
 #include "BulletRigidObject.h"
+#include "esp/assets/ResourceManager.h"
+#include "esp/metadata/managers/AssetAttributesManager.h"
 
 //!  A Few considerations in construction
 //!  Bullet Mesh conversion adapted from:
@@ -203,7 +205,7 @@ BulletRigidObject::buildPrimitiveCollisionObject(int primTypeVal,
     case metadata::PrimObjTypes::CYLINDER_WF: {
       // use bullet cylinder shape :btCylinderShape (const btVector3&
       // halfExtents);
-      btVector3 dim(1.0, 1.0, 1.0);
+      btVector3 dim(1.0, halfLength, 1.0);
       obj = std::make_unique<btCylinderShape>(dim);
       break;
     }
@@ -260,8 +262,8 @@ void BulletRigidObject::setCollisionFromBB() {
 
 void BulletRigidObject::setMotionType(MotionType mt) {
   if (mt == MotionType::UNDEFINED) {
-    ESP_WARNING() << "Cannot set motion type "
-                     "to MotionType::UNDEFINED.  Aborting.";
+    ESP_WARNING() << "Cannot set motion type to MotionType::UNDEFINED, so "
+                     "aborting; motion type is unchanged.";
     return;
   }
   if (mt == objectMotionType_) {
@@ -366,12 +368,16 @@ void BulletRigidObject::constructAndAddRigidBody(MotionType mt) {
     // set physical properties from possibly modified current rigidBody
     info.m_startWorldTransform = bObjectRigidBody_->getWorldTransform();
     info.m_friction = bObjectRigidBody_->getFriction();
+    info.m_rollingFriction = bObjectRigidBody_->getRollingFriction();
+    info.m_spinningFriction = bObjectRigidBody_->getSpinningFriction();
     info.m_restitution = bObjectRigidBody_->getRestitution();
     info.m_linearDamping = bObjectRigidBody_->getLinearDamping();
     info.m_angularDamping = bObjectRigidBody_->getAngularDamping();
   } else {
     // set properties from initialization template
     info.m_friction = tmpAttr->getFrictionCoefficient();
+    info.m_rollingFriction = tmpAttr->getRollingFrictionCoefficient();
+    info.m_spinningFriction = tmpAttr->getSpinningFrictionCoefficient();
     info.m_restitution = tmpAttr->getRestitutionCoefficient();
     info.m_linearDamping = tmpAttr->getLinearDamping();
     info.m_angularDamping = tmpAttr->getAngularDamping();
@@ -426,7 +432,7 @@ void BulletRigidObject::activateCollisionIsland() {
   // bitset template argument specifies reasonable allocation size at compile
   // time - it is not expected that we would require more than 65536 different
   // islands; if we do, this number should be increased.
-  Magnum::Math::BoolVector<65536> overlappingSimIslands;
+  Magnum::Math::BitVector<65536> overlappingSimIslands;
   // each index represents an island tag present - default in bullet is -1, so
   // add one.
   overlappingSimIslands.set(thisColObj->getIslandTag() + 1, true);

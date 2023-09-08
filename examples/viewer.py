@@ -1,10 +1,11 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
 import ctypes
 import math
 import os
+import string
 import sys
 import time
 from enum import Enum
@@ -15,33 +16,68 @@ sys.setdlopenflags(flags | ctypes.RTLD_GLOBAL)
 
 import magnum as mn
 import numpy as np
+from magnum import shaders, text
 from magnum.platform.glfw import Application
 
 import habitat_sim
-from examples.settings import default_sim_settings, make_cfg
-from habitat_sim import physics
+from habitat_sim import ReplayRenderer, ReplayRendererConfiguration, physics
 from habitat_sim.logging import LoggingContext, logger
 from habitat_sim.utils.common import quat_from_angle_axis
+from habitat_sim.utils.settings import default_sim_settings, make_cfg
 
 
 class HabitatSimInteractiveViewer(Application):
+    # the maximum number of chars displayable in the app window
+    # using the magnum text module. These chars are used to
+    # display the CPU/GPU usage data
+    MAX_DISPLAY_TEXT_CHARS = 256
+
+    # how much to displace window text relative to the center of the
+    # app window (e.g if you want the display text in the top left of
+    # the app window, you will displace the text
+    # window width * -TEXT_DELTA_FROM_CENTER in the x axis and
+    # window height * TEXT_DELTA_FROM_CENTER in the y axis, as the text
+    # position defaults to the middle of the app window)
+    TEXT_DELTA_FROM_CENTER = 0.49
+
+    # font size of the magnum in-window display text that displays
+    # CPU and GPU usage info
+    DISPLAY_FONT_SIZE = 16.0
+
     def __init__(self, sim_settings: Dict[str, Any]) -> None:
+        self.sim_settings: Dict[str:Any] = sim_settings
+
+        self.enable_batch_renderer: bool = self.sim_settings["enable_batch_renderer"]
+        self.num_env: int = (
+            self.sim_settings["num_environments"] if self.enable_batch_renderer else 1
+        )
+
+        # Compute environment camera resolution based on the number of environments to render in the window.
+        window_size: mn.Vector2 = (
+            self.sim_settings["window_width"],
+            self.sim_settings["window_height"],
+        )
+
         configuration = self.Configuration()
         configuration.title = "Habitat Sim Interactive Viewer"
+        configuration.size = window_size
         Application.__init__(self, configuration)
-        self.sim_settings: Dict[str:Any] = sim_settings
         self.fps: float = 60.0
+
+        # Compute environment camera resolution based on the number of environments to render in the window.
+        grid_size: mn.Vector2i = ReplayRenderer.environment_grid_size(self.num_env)
+        camera_resolution: mn.Vector2 = mn.Vector2(self.framebuffer_size) / mn.Vector2(
+            grid_size
+        )
+        self.sim_settings["width"] = camera_resolution[0]
+        self.sim_settings["height"] = camera_resolution[1]
+
         # draw Bullet debug line visualizations (e.g. collision meshes)
         self.debug_bullet_draw = False
         # draw active contact point debug line visualizations
         self.contact_debug_draw = False
         # cache most recently loaded URDF file for quick-reload
         self.cached_urdf = ""
-
-        # set proper viewport size
-        self.viewport_size: mn.Vector2i = mn.gl.default_framebuffer.viewport.size()
-        self.sim_settings["width"] = self.viewport_size[0]
-        self.sim_settings["height"] = self.viewport_size[1]
 
         # set up our movement map
         key = Application.KeyEvent.Key
@@ -73,6 +109,59 @@ class HabitatSimInteractiveViewer(Application):
             key.Z: "move_up",
         }
 
+        # Load a TrueTypeFont plugin and open the font file
+        self.display_font = text.FontManager().load_and_instantiate("TrueTypeFont")
+        relative_path_to_font = "../data/fonts/ProggyClean.ttf"
+        self.display_font.open_file(
+            os.path.join(os.path.dirname(__file__), relative_path_to_font),
+            13,
+        )
+
+        # Glyphs we need to render everything
+        self.glyph_cache = text.GlyphCache(mn.Vector2i(256))
+        self.display_font.fill_glyph_cache(
+            self.glyph_cache,
+            string.ascii_lowercase
+            + string.ascii_uppercase
+            + string.digits
+            + ":-_+,.! %µ",
+        )
+
+        # magnum text object that displays CPU/GPU usage data in the app window
+        self.window_text = text.Renderer2D(
+            self.display_font,
+            self.glyph_cache,
+            HabitatSimInteractiveViewer.DISPLAY_FONT_SIZE,
+            text.Alignment.TOP_LEFT,
+        )
+        self.window_text.reserve(HabitatSimInteractiveViewer.MAX_DISPLAY_TEXT_CHARS)
+
+        # text object transform in window space is Projection matrix times Translation Matrix
+        # put text in top left of window
+        self.window_text_transform = mn.Matrix3.projection(
+            self.framebuffer_size
+        ) @ mn.Matrix3.translation(
+            mn.Vector2(self.framebuffer_size)
+            * mn.Vector2(
+                -HabitatSimInteractiveViewer.TEXT_DELTA_FROM_CENTER,
+                HabitatSimInteractiveViewer.TEXT_DELTA_FROM_CENTER,
+            )
+        )
+        self.shader = shaders.VectorGL2D()
+
+        # make magnum text background transparent
+        mn.gl.Renderer.enable(mn.gl.Renderer.Feature.BLENDING)
+        mn.gl.Renderer.set_blend_function(
+            mn.gl.Renderer.BlendFunction.ONE,
+            mn.gl.Renderer.BlendFunction.ONE_MINUS_SOURCE_ALPHA,
+        )
+        mn.gl.Renderer.set_blend_equation(
+            mn.gl.Renderer.BlendEquation.ADD, mn.gl.Renderer.BlendEquation.ADD
+        )
+
+        # variables that track app data and CPU/GPU usage
+        self.num_frames_to_track = 60
+
         # Cycle mouse utilities
         self.mouse_interaction = MouseMode.LOOK
         self.mouse_grabber: Optional[MouseGrabber] = None
@@ -88,10 +177,16 @@ class HabitatSimInteractiveViewer(Application):
         # configure our simulator
         self.cfg: Optional[habitat_sim.simulator.Configuration] = None
         self.sim: Optional[habitat_sim.simulator.Simulator] = None
+        self.tiled_sims: list[habitat_sim.simulator.Simulator] = None
+        self.replay_renderer_cfg: Optional[ReplayRendererConfiguration] = None
+        self.replay_renderer: Optional[ReplayRenderer] = None
         self.reconfigure_sim()
 
         # compute NavMesh if not already loaded by the scene.
-        if not self.sim.pathfinder.is_loaded and self.cfg.sim_cfg.scene_id != "NONE":
+        if (
+            not self.sim.pathfinder.is_loaded
+            and self.cfg.sim_cfg.scene_id.lower() != "none"
+        ):
             self.navmesh_config_and_recompute()
 
         self.time_since_last_simulation = 0.0
@@ -168,9 +263,6 @@ class HabitatSimInteractiveViewer(Application):
         # Occasionally a frame will pass quicker than 1/60 seconds
         if self.time_since_last_simulation >= 1.0 / self.fps:
             if self.simulating or self.simulate_single_step:
-                # step physics at a fixed rate
-                # In the interest of frame rate, only a single step is taken,
-                # even if time_since_last_simulation is quite large
                 self.sim.step_world(1.0 / self.fps)
                 self.simulate_single_step = False
                 if simulation_call is not None:
@@ -185,12 +277,18 @@ class HabitatSimInteractiveViewer(Application):
 
         keys = active_agent_id_and_sensor_name
 
-        self.sim._Simulator__sensors[keys[0]][keys[1]].draw_observation()
-        agent = self.sim.get_agent(keys[0])
-        self.render_camera = agent.scene_node.node_sensor_suite.get(keys[1])
-        self.debug_draw()
-        self.render_camera.render_target.blit_rgba_to_default()
+        if self.enable_batch_renderer:
+            self.render_batch()
+        else:
+            self.sim._Simulator__sensors[keys[0]][keys[1]].draw_observation()
+            agent = self.sim.get_agent(keys[0])
+            self.render_camera = agent.scene_node.node_sensor_suite.get(keys[1])
+            self.debug_draw()
+            self.render_camera.render_target.blit_rgba_to_default()
+
+        # draw CPU/GPU usage data and other info to the app window
         mn.gl.default_framebuffer.bind()
+        self.draw_text(self.render_camera.specification())
 
         self.swap_buffers()
         Timer.next_frame()
@@ -252,24 +350,79 @@ class HabitatSimInteractiveViewer(Application):
         self.agent_id: int = self.sim_settings["default_agent"]
         self.cfg.agents[self.agent_id] = self.default_agent_config()
 
-        if self.sim is None:
-            self.sim = habitat_sim.Simulator(self.cfg)
+        if self.enable_batch_renderer:
+            self.cfg.enable_batch_renderer = True
+            self.cfg.sim_cfg.create_renderer = False
+            self.cfg.sim_cfg.enable_gfx_replay_save = True
 
+        if self.sim_settings["use_default_lighting"]:
+            logger.info("Setting default lighting override for scene.")
+            self.cfg.sim_cfg.override_scene_light_defaults = True
+            self.cfg.sim_cfg.scene_light_setup = habitat_sim.gfx.DEFAULT_LIGHTING_KEY
+
+        if self.sim is None:
+            self.tiled_sims = []
+            for _i in range(self.num_env):
+                self.tiled_sims.append(habitat_sim.Simulator(self.cfg))
+            self.sim = self.tiled_sims[0]
         else:  # edge case
-            if self.sim.config.sim_cfg.scene_id == self.cfg.sim_cfg.scene_id:
-                # we need to force a reset, so change the internal config scene name
-                self.sim.config.sim_cfg.scene_id = "NONE"
-            self.sim.reconfigure(self.cfg)
+            for i in range(self.num_env):
+                if (
+                    self.tiled_sims[i].config.sim_cfg.scene_id
+                    == self.cfg.sim_cfg.scene_id
+                ):
+                    # we need to force a reset, so change the internal config scene name
+                    self.tiled_sims[i].config.sim_cfg.scene_id = "NONE"
+                self.tiled_sims[i].reconfigure(self.cfg)
+
         # post reconfigure
-        self.active_scene_graph = self.sim.get_active_scene_graph()
         self.default_agent = self.sim.get_agent(self.agent_id)
-        self.agent_body_node = self.default_agent.scene_node
-        self.render_camera = self.agent_body_node.node_sensor_suite.get("color_sensor")
+        self.render_camera = self.default_agent.scene_node.node_sensor_suite.get(
+            "color_sensor"
+        )
+
         # set sim_settings scene name as actual loaded scene
         self.sim_settings["scene"] = self.sim.curr_scene_name
 
+        # Initialize replay renderer
+        if self.enable_batch_renderer and self.replay_renderer is None:
+            self.replay_renderer_cfg = ReplayRendererConfiguration()
+            self.replay_renderer_cfg.num_environments = self.num_env
+            self.replay_renderer_cfg.standalone = (
+                False  # Context is owned by the GLFW window
+            )
+            self.replay_renderer_cfg.sensor_specifications = self.cfg.agents[
+                self.agent_id
+            ].sensor_specifications
+            self.replay_renderer_cfg.gpu_device_id = self.cfg.sim_cfg.gpu_device_id
+            self.replay_renderer_cfg.force_separate_semantic_scene_graph = False
+            self.replay_renderer_cfg.leave_context_with_background_renderer = False
+            self.replay_renderer = ReplayRenderer.create_batch_replay_renderer(
+                self.replay_renderer_cfg
+            )
+            # Pre-load composite files
+            if sim_settings["composite_files"] is not None:
+                for composite_file in sim_settings["composite_files"]:
+                    self.replay_renderer.preload_file(composite_file)
+
         Timer.start()
         self.step = -1
+
+    def render_batch(self):
+        """
+        This method updates the replay manager with the current state of environments and renders them.
+        """
+        for i in range(self.num_env):
+            # Apply keyframe
+            keyframe = self.tiled_sims[i].gfx_replay_manager.extract_keyframe()
+            self.replay_renderer.set_environment_keyframe(i, keyframe)
+            # Copy sensor transforms
+            sensor_suite = self.tiled_sims[i]._sensors
+            for sensor_uuid, sensor in sensor_suite.items():
+                transform = sensor._sensor_object.node.absolute_transformation()
+                self.replay_renderer.set_sensor_transform(i, sensor_uuid, transform)
+            # Render
+            self.replay_renderer.render(mn.gl.default_framebuffer)
 
     def move_and_look(self, repetitions: int) -> None:
         """
@@ -277,7 +430,7 @@ class HabitatSimInteractiveViewer(Application):
         any changes in the movement keys map `Dict[KeyEvent.key, Bool]`.
         When a key in the map is set to `True` the corresponding action is taken.
         """
-        # avoids unecessary updates to grabber's object position
+        # avoids unnecessary updates to grabber's object position
         if repetitions == 0:
             return
 
@@ -366,7 +519,7 @@ class HabitatSimInteractiveViewer(Application):
 
         elif key == pressed.PERIOD:
             if self.simulating:
-                logger.warn("Warning: physic simulation already running")
+                logger.warn("Warning: physics simulation already running")
             else:
                 self.simulate_single_step = True
                 logger.info("Command: physics step taken")
@@ -407,11 +560,31 @@ class HabitatSimInteractiveViewer(Application):
                 self.cached_urdf = urdf_file_path
                 aom = self.sim.get_articulated_object_manager()
                 ao = aom.add_articulated_object_from_urdf(
-                    urdf_file_path, fixed_base, 1.0, 1.0, True
+                    urdf_file_path,
+                    fixed_base,
+                    1.0,
+                    1.0,
+                    True,
+                    maintain_link_order=False,
+                    intertia_from_urdf=False,
                 )
-                ao.translation = self.agent_body_node.transformation.transform_point(
-                    [0.0, 1.0, -1.5]
+                ao.translation = (
+                    self.default_agent.scene_node.transformation.transform_point(
+                        [0.0, 1.0, -1.5]
+                    )
                 )
+                # check removal and auto-creation
+                joint_motor_settings = habitat_sim.physics.JointMotorSettings(
+                    position_target=0.0,
+                    position_gain=1.0,
+                    velocity_target=0.0,
+                    velocity_gain=1.0,
+                    max_impulse=1000.0,
+                )
+                existing_motor_ids = ao.existing_joint_motor_ids
+                for motor_id in existing_motor_ids:
+                    ao.remove_joint_motor(motor_id)
+                ao.create_all_motors(joint_motor_settings)
             else:
                 logger.warn("Load URDF: input file not found. Aborting.")
 
@@ -477,7 +650,7 @@ class HabitatSimInteractiveViewer(Application):
         """
         Handles `Application.MouseMoveEvent`. When in LOOK mode, enables the left
         mouse button to steer the agent's facing direction. When in GRAB mode,
-        continues to update the grabber's object positiion with our agents position.
+        continues to update the grabber's object position with our agents position.
         """
         button = Application.MouseMoveEvent.Buttons
         # if interactive mode -> LOOK MODE
@@ -492,7 +665,7 @@ class HabitatSimInteractiveViewer(Application):
 
             # up/down on cameras' scene nodes
             action = habitat_sim.agent.ObjectControls()
-            sensors = list(self.agent_body_node.subtree_sensors.values())
+            sensors = list(self.default_agent.scene_node.subtree_sensors.values())
             [action(s.object, "look_down", act_spec(delta.y), False) for s in sensors]
 
         # if interactive mode is TRUE -> GRAB MODE
@@ -564,7 +737,7 @@ class HabitatSimInteractiveViewer(Application):
                     # done checking for AO
 
                     if hit_object >= 0:
-                        node = self.agent_body_node
+                        node = self.default_agent.scene_node
                         constraint_settings = physics.RigidConstraintSettings()
 
                         constraint_settings.object_id_a = hit_object
@@ -635,7 +808,7 @@ class HabitatSimInteractiveViewer(Application):
             scroll_delta = scroll_mod_val * mod_val
             if alt_pressed or ctrl_pressed:
                 # rotate the object's local constraint frame
-                agent_t = self.agent_body_node.transformation_matrix()
+                agent_t = self.default_agent.scene_node.transformation_matrix()
                 # ALT - yaw
                 rotation_axis = agent_t.transform_vector(mn.Vector3(0, 1, 0))
                 if alt_pressed and ctrl_pressed:
@@ -674,7 +847,7 @@ class HabitatSimInteractiveViewer(Application):
         render_camera = self.render_camera.render_camera
         ray = render_camera.unproject(point)
 
-        rotation: mn.Matrix3x3 = self.agent_body_node.rotation.to_matrix()
+        rotation: mn.Matrix3x3 = self.default_agent.scene_node.rotation.to_matrix()
         translation: mn.Vector3 = (
             render_camera.node.absolute_translation
             + ray.direction * self.mouse_grabber.grip_depth
@@ -709,11 +882,10 @@ class HabitatSimInteractiveViewer(Application):
         self.navmesh_settings.set_defaults()
         self.navmesh_settings.agent_height = self.cfg.agents[self.agent_id].height
         self.navmesh_settings.agent_radius = self.cfg.agents[self.agent_id].radius
-
+        self.navmesh_settings.include_static_objects = True
         self.sim.recompute_navmesh(
             self.sim.pathfinder,
             self.navmesh_settings,
-            include_static_objects=True,
         )
 
     def exit_event(self, event: Application.ExitEvent):
@@ -721,9 +893,31 @@ class HabitatSimInteractiveViewer(Application):
         Overrides exit_event to properly close the Simulator before exiting the
         application.
         """
-        self.sim.close(destroy=True)
-        event.accepted = True
+        for i in range(self.num_env):
+            self.tiled_sims[i].close(destroy=True)
+            event.accepted = True
         exit(0)
+
+    def draw_text(self, sensor_spec):
+        self.shader.bind_vector_texture(self.glyph_cache.texture)
+        self.shader.transformation_projection_matrix = self.window_text_transform
+        self.shader.color = [1.0, 1.0, 1.0]
+
+        sensor_type_string = str(sensor_spec.sensor_type.name)
+        sensor_subtype_string = str(sensor_spec.sensor_subtype.name)
+        if self.mouse_interaction == MouseMode.LOOK:
+            mouse_mode_string = "LOOK"
+        elif self.mouse_interaction == MouseMode.GRAB:
+            mouse_mode_string = "GRAB"
+        self.window_text.render(
+            f"""
+{self.fps} FPS
+Sensor Type: {sensor_type_string}
+Sensor Subtype: {sensor_subtype_string}
+Mouse Interaction Mode: {mouse_mode_string}
+            """
+        )
+        self.shader.draw(self.window_text.mesh)
 
     def print_help_text(self) -> None:
         """
@@ -871,7 +1065,7 @@ class Timer:
     @staticmethod
     def start() -> None:
         """
-        Starts timer and resets previous frame time to the start time
+        Starts timer and resets previous frame time to the start time.
         """
         Timer.running = True
         Timer.start_time = time.time()
@@ -881,7 +1075,7 @@ class Timer:
     @staticmethod
     def stop() -> None:
         """
-        Stops timer and erases any previous time data, reseting the timer
+        Stops timer and erases any previous time data, resetting the timer.
         """
         Timer.running = False
         Timer.start_time = 0.0
@@ -908,29 +1102,84 @@ if __name__ == "__main__":
     # optional arguments
     parser.add_argument(
         "--scene",
-        default="NONE",
+        default="./data/test_assets/scenes/simple_room.glb",
         type=str,
-        help='scene/stage file to load (default: "NONE")',
+        help='scene/stage file to load (default: "./data/test_assets/scenes/simple_room.glb")',
     )
     parser.add_argument(
         "--dataset",
-        default="default",
+        default="./data/objects/ycb/ycb.scene_dataset_config.json",
         type=str,
         metavar="DATASET",
-        help="dataset configuration file to use (default: default)",
+        help='dataset configuration file to use (default: "./data/objects/ycb/ycb.scene_dataset_config.json")',
     )
     parser.add_argument(
-        "--disable_physics",
+        "--disable-physics",
         action="store_true",
         help="disable physics simulation (default: False)",
     )
+    parser.add_argument(
+        "--use-default-lighting",
+        action="store_true",
+        help="Override configured lighting to use default lighting for the stage.",
+    )
+    parser.add_argument(
+        "--ibl",
+        action="store_true",
+        help="Enable image-based lighting. Only applicable to scenes built with PBR materials.",
+    )
+    parser.add_argument(
+        "--enable-batch-renderer",
+        action="store_true",
+        help="Enable batch rendering mode. The number of concurrent environments is specified with the num-environments parameter.",
+    )
+    parser.add_argument(
+        "--num-environments",
+        default=1,
+        type=int,
+        help="Number of concurrent environments to batch render. Note that only the first environment simulates physics and can be controlled.",
+    )
+    parser.add_argument(
+        "--composite-files",
+        type=str,
+        nargs="*",
+        help="Composite files that the batch renderer will use in-place of simulation assets to improve memory usage and performance. If none is specified, the original scene files will be loaded from disk.",
+    )
+    parser.add_argument(
+        "--width",
+        default=800,
+        type=int,
+        help="Horizontal resolution of the window.",
+    )
+    parser.add_argument(
+        "--height",
+        default=600,
+        type=int,
+        help="Vertical resolution of the window.",
+    )
 
     args = parser.parse_args()
+
+    if args.num_environments < 1:
+        parser.error("num-environments must be a positive non-zero integer.")
+    if args.width < 1:
+        parser.error("width must be a positive non-zero integer.")
+    if args.height < 1:
+        parser.error("height must be a positive non-zero integer.")
 
     # Setting up sim_settings
     sim_settings: Dict[str, Any] = default_sim_settings
     sim_settings["scene"] = args.scene
     sim_settings["scene_dataset_config_file"] = args.dataset
     sim_settings["enable_physics"] = not args.disable_physics
+    sim_settings["use_default_lighting"] = args.use_default_lighting
+    sim_settings["enable_batch_renderer"] = args.enable_batch_renderer
+    sim_settings["num_environments"] = args.num_environments
+    sim_settings["composite_files"] = args.composite_files
+    sim_settings["window_width"] = args.width
+    sim_settings["window_height"] = args.height
+    sim_settings["pbr_image_based_lighting"] = args.ibl
+    sim_settings["default_agent_navmesh"] = False
 
+    # start the application
     HabitatSimInteractiveViewer(sim_settings).exec()

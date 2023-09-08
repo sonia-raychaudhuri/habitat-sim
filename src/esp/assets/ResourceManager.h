@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -12,82 +12,77 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include <Corrade/Containers/EnumSet.h>
-#include <Corrade/Containers/Optional.h>
-#include <Magnum/DebugTools/ColorMap.h>
-#include <Magnum/EigenIntegration/Integration.h>
-#include <Magnum/GL/TextureFormat.h>
-#include <Magnum/MeshTools/Compile.h>
-#include <Magnum/MeshTools/Transform.h>
-#include <Magnum/ResourceManager.h>
-#include <Magnum/SceneGraph/MatrixTransformation3D.h>
-#include <Magnum/Trade/Trade.h>
+#include <Magnum/Trade/AbstractImporter.h>
 
 #include "Asset.h"
-#include "BaseMesh.h"
-#include "CollisionMeshData.h"
-#include "GenericMeshData.h"
-#include "GenericSemanticMeshData.h"
-#include "MeshData.h"
 #include "MeshMetaData.h"
-#include "RenderAssetInstanceCreationInfo.h"
-#include "esp/geo/VoxelGrid.h"
-#include "esp/gfx/CubeMap.h"
 #include "esp/gfx/Drawable.h"
-#include "esp/gfx/DrawableGroup.h"
-#include "esp/gfx/MaterialData.h"
-#include "esp/gfx/PbrImageBasedLighting.h"
 #include "esp/gfx/ShaderManager.h"
-#include "esp/gfx/ShadowMapManager.h"
 #include "esp/physics/configure.h"
-#include "esp/scene/SceneManager.h"
-#include "esp/scene/SceneNode.h"
 
-#include "esp/metadata/MetadataMediator.h"
-#include "esp/metadata/attributes/AttributesBase.h"
-
-#ifdef ESP_BUILD_WITH_VHACD
-#include <VHACD.h>
-#endif
+#include "esp/metadata/attributes/AttributesEnumMaps.h"
 
 namespace Mn = Magnum;
 
-// forward declarations
-namespace Magnum {
-namespace Trade {
-class AbstractImporter;
-class PhongMaterialData;
-}  // namespace Trade
-}  // namespace Magnum
-
 namespace esp {
+namespace assets {
+struct PhongMaterialColor;
+}
 namespace gfx {
 class Drawable;
+class DrawableConfiguration;
+class PbrIBLHelper;
+struct SkinData;
+struct InstanceSkinData;
 namespace replay {
 class Recorder;
 }
 }  // namespace gfx
+namespace metadata {
+namespace URDF {
+class Model;
+}
+class MetadataMediator;
+namespace attributes {
+class ObjectAttributes;
+class PbrShaderAttributes;
+class PhysicsManagerAttributes;
+class SceneObjectInstanceAttributes;
+class StageAttributes;
+}  // namespace attributes
+namespace managers {
+class AOAttributesManager;
+class AssetAttributesManager;
+class LightLayoutAttributesManager;
+class ObjectAttributesManager;
+class PhysicsAttributesManager;
+class StageAttributesManager;
+}  // namespace managers
+}  // namespace metadata
 namespace scene {
+class SceneManager;
 class SemanticScene;
+class CCSemanticObject;
 struct SceneConfiguration;
 }  // namespace scene
 namespace physics {
+class ArticulatedObject;
 class PhysicsManager;
 class RigidObject;
 }  // namespace physics
 namespace nav {
 class PathFinder;
 }
-namespace io {
-namespace URDF {
-class Model;
-}
-}  // namespace io
 namespace assets {
+class BaseMesh;
+struct CollisionMeshData;
+class GenericSemanticMeshData;
+struct MeshData;
+struct RenderAssetInstanceCreationInfo;
 // used for shadertype specification
 using metadata::attributes::ObjectInstanceShaderType;
 
@@ -105,42 +100,9 @@ class ResourceManager {
   /** @brief Convenience typedef for Importer class */
   using Importer = Mn::Trade::AbstractImporter;
 
-#ifdef ESP_BUILD_WITH_VHACD
-  /**
-   * @brief Simple struct interface for creating and managing VHACD parameters.
-   * These parameters are passed into VHACD and specify how convex hull
-   * decomposition is ran.
-   */
-  struct VHACDParameters : VHACD::IVHACD::Parameters {
-    VHACDParameters() {
-      m_oclAcceleration = 0u;  // OCL Acceleration does not work on VHACD
-    }
-    ESP_SMART_POINTERS(VHACDParameters)
-  };
-
-  VHACD::IVHACD* interfaceVHACD;
-#endif
-
-  /**
-   * @brief Flag
-   *
-   * @see @ref Flags, @ref flags()
-   */
-  enum class Flag : Magnum::UnsignedShort {
-    /**
-     * use pbr image based lighting
-     */
-    PbrImageBasedLighting = 1 << 0,
-  };
-
-  /**
-   * @brief Flags
-   */
-  typedef Corrade::Containers::EnumSet<Flag> Flags;
-
   /** @brief Constructor */
-  explicit ResourceManager(metadata::MetadataMediator::ptr& _metadataMediator,
-                           Flags flags = {});
+  explicit ResourceManager(
+      std::shared_ptr<metadata::MetadataMediator> _metadataMediator);
 
   /** @brief Destructor */
   ~ResourceManager();
@@ -171,8 +133,15 @@ class ResourceManager {
   void initPhysicsManager(
       std::shared_ptr<physics::PhysicsManager>& physicsManager,
       scene::SceneNode* parent,
-      const metadata::attributes::PhysicsManagerAttributes::ptr&
+      const std::shared_ptr<metadata::attributes::PhysicsManagerAttributes>&
           physicsManagerAttributes);
+
+  /**
+   * @brief called after MM is set or reset, go through and load/generate
+   * IBL assets that have not already been loaded. Will not reload assets
+   * already loaded.
+   */
+  void loadAllIBLAssets();
 
   /**
    * @brief Return the currently loaded @ref esp::scene::SemanticScene .
@@ -250,8 +219,10 @@ class ResourceManager {
    * @return Whether or not the scene load succeeded.
    */
   bool loadStage(
-      const metadata::attributes::StageAttributes::ptr& stageAttributes,
-      const metadata::attributes::SceneObjectInstanceAttributes::cptr&
+      const std::shared_ptr<metadata::attributes::StageAttributes>&
+          stageAttributes,
+      const std::shared_ptr<
+          const metadata::attributes::SceneObjectInstanceAttributes>&
           stageInstanceAttributes,
       const std::shared_ptr<physics::PhysicsManager>& _physicsManager,
       esp::scene::SceneManager* sceneManagerPtr,
@@ -282,7 +253,8 @@ class ResourceManager {
    * registration call fails.
    */
   bool instantiateAssetsOnDemand(
-      const metadata::attributes::ObjectAttributes::ptr& ObjectAttributes);
+      const std::shared_ptr<metadata::attributes::ObjectAttributes>&
+          ObjectAttributes);
 
   //======== Accessor functions ========
   /**
@@ -296,57 +268,53 @@ class ResourceManager {
    * individual components of the asset.
    */
   const std::vector<assets::CollisionMeshData>& getCollisionMesh(
-      const std::string& collisionAssetHandle) const {
-    auto colMeshGroupIter = collisionMeshGroups_.find(collisionAssetHandle);
-    CORRADE_INTERNAL_ASSERT(colMeshGroupIter != collisionMeshGroups_.end());
-    return colMeshGroupIter->second;
-  }
+      const std::string& collisionAssetHandle) const;
 
   /**
    * @brief Return manager for construction and access to asset attributes.
    */
-  metadata::managers::AssetAttributesManager::ptr getAssetAttributesManager()
-      const {
-    return metadataMediator_->getAssetAttributesManager();
-  }
+  std::shared_ptr<metadata::managers::AssetAttributesManager>
+  getAssetAttributesManager() const;
+
   /**
    * @brief Return manager for construction and access to light and lighting
    * layout attributes.
    */
-  metadata::managers::LightLayoutAttributesManager::ptr
-  getLightLayoutAttributesManager() const {
-    return metadataMediator_->getLightLayoutAttributesManager();
-  }
+  std::shared_ptr<metadata::managers::LightLayoutAttributesManager>
+  getLightLayoutAttributesManager() const;
+
+  /**
+   * @brief Return manager for construction and access to articulated object
+   * attributes.
+   */
+  std::shared_ptr<metadata::managers::AOAttributesManager>
+  getAOAttributesManager() const;
 
   /**
    * @brief Return manager for construction and access to object attributes.
    */
-  metadata::managers::ObjectAttributesManager::ptr getObjectAttributesManager()
-      const {
-    return metadataMediator_->getObjectAttributesManager();
-  }
+  std::shared_ptr<metadata::managers::ObjectAttributesManager>
+  getObjectAttributesManager() const;
+
   /**
    * @brief Return manager for construction and access to physics world
    * attributes.
    */
-  metadata::managers::PhysicsAttributesManager::ptr
-  getPhysicsAttributesManager() const {
-    return metadataMediator_->getPhysicsAttributesManager();
-  }
+  std::shared_ptr<metadata::managers::PhysicsAttributesManager>
+  getPhysicsAttributesManager() const;
+
   /**
    * @brief Return manager for construction and access to scene attributes.
    */
-  metadata::managers::StageAttributesManager::ptr getStageAttributesManager()
-      const {
-    return metadataMediator_->getStageAttributesManager();
-  }
+  std::shared_ptr<metadata::managers::StageAttributesManager>
+  getStageAttributesManager() const;
 
   /**
    * @brief Set a reference to the current @ref metadataMediator_.  Perform any
    * initialization that may be required when @ref metadataMediator_ is changed.
    * @param MM a reference to the new @ref metadataMediator_.
    */
-  void setMetadataMediator(metadata::MetadataMediator::ptr MM) {
+  void setMetadataMediator(std::shared_ptr<metadata::MetadataMediator> MM) {
     metadataMediator_ = std::move(MM);
   }
 
@@ -359,51 +327,7 @@ class ResourceManager {
    * Typically the filepath of file-based assets.
    * @return The asset's @ref MeshMetaData object.
    */
-  const MeshMetaData& getMeshMetaData(const std::string& metaDataName) const {
-    auto resDictMDIter = resourceDict_.find(metaDataName);
-    CORRADE_INTERNAL_ASSERT(resDictMDIter != resourceDict_.end());
-    return resDictMDIter->second.meshMetaData;
-  }
-
-  /**
-   * @brief check to see if a particular voxel grid has been created &
-   * registered or not.
-   * @param voxelGridName The key identifying the asset in @ref resourceDict_.
-   * Typically the filepath of file-based assets.
-   * @return Whether or not the specified grid exists.
-   */
-  bool voxelGridExists(const std::string& voxelGridName) const {
-    return voxelGridDict_.count(voxelGridName) > 0;
-  }
-
-  /**
-   * @brief Retrieve a VoxelGrid given a particular voxel grid handle.
-   * @param voxelGridName The key identifying the asset in @ref resourceDict_.
-   * Typically the filepath of file-based assets.
-   * @return The specified VoxelGrid.
-   */
-  std::shared_ptr<esp::geo::VoxelGrid> getVoxelGrid(
-      const std::string& voxelGridName) const {
-    auto voxGridIter = voxelGridDict_.find(voxelGridName);
-    CORRADE_INTERNAL_ASSERT(voxGridIter != voxelGridDict_.end());
-    return voxGridIter->second;
-  }
-
-  /**
-   * @brief Registers a given VoxelGrid pointer under the given handle in the
-   * voxelGridDict_ if no such VoxelGrid has been registered.
-   * @param voxelGridHandle The key to register the VoxelGrid under.
-   * @param VoxelGridPtr The pointer to the VoxelGrid
-   * @return Whether or not the registration succeeded.
-   */
-  bool registerVoxelGrid(
-      const std::string& voxelGridHandle,
-      const std::shared_ptr<esp::geo::VoxelGrid>& VoxelGridPtr) {
-    auto voxGridEmplaceIter =
-        voxelGridDict_.emplace(voxelGridHandle, VoxelGridPtr);
-    // return whether placed or not;
-    return voxGridEmplaceIter.second;
-  }
+  const MeshMetaData& getMeshMetaData(const std::string& metaDataName) const;
 
   /**
    * @brief Get a named @ref LightSetup
@@ -427,10 +351,7 @@ class ResourceManager {
    */
   void setLightSetup(gfx::LightSetup setup,
                      const Mn::ResourceKey& key = Mn::ResourceKey{
-                         DEFAULT_LIGHTING_KEY}) {
-    shaderManager_.set(key, std::move(setup), Mn::ResourceDataState::Mutable,
-                       Mn::ResourcePolicy::Manual);
-  }
+                         DEFAULT_LIGHTING_KEY});
 
   /**
    * @brief Construct a unified @ref MeshData from a loaded asset's collision
@@ -459,42 +380,6 @@ class ResourceManager {
       std::vector<std::uint16_t>& objectIds,
       const std::string& filename) const;
 
-#ifdef ESP_BUILD_WITH_VHACD
-  /**
-   * @brief Converts a MeshMetaData into a obj file.
-   *
-   * @param filename The MeshMetaData filename to be converted to obj.
-   * @param new_filename The name of the file that will be created.
-   * @param filepath The file path, including new file name, for the obj file.
-   */
-  bool outputMeshMetaDataToObj(const std::string& filename,
-                               const std::string& new_filename,
-                               const std::string& filepath) const;
-
-  /**
-   * @brief Returns the number of resources registered under a given resource
-   * name.
-   *
-   * @param resourceName The name of the resource.
-   */
-  bool isAssetDataRegistered(const std::string& resourceName) const;
-
-  /**
-   * @brief Runs convex hull decomposition on a specified file.
-   *
-   * @param filename The MeshMetaData filename to be converted.
-   * @param chdFilename The new filename for the chd collision mesh.
-   * @param params VHACD params that specify resolution, vertices per convex
-   * hull, etc.
-   * @param saveChdToObj Specifies whether or not to save the newly created
-   * convex hull asset to an obj file.
-   */
-  void createConvexHullDecomposition(
-      const std::string& filename,
-      const std::string& chdFilename,
-      const VHACDParameters& params = VHACDParameters(),
-      bool saveChdToObj = false);
-#endif
   /**
    * @brief Add an object from a specified object template handle to the
    * specified @ref DrawableGroup as a child of the specified @ref
@@ -516,7 +401,8 @@ class ResourceManager {
    * result of this process.
    */
   void addObjectToDrawables(
-      const metadata::attributes::ObjectAttributes::ptr& ObjectAttributes,
+      const std::shared_ptr<metadata::attributes::ObjectAttributes>&
+          ObjectAttributes,
       scene::SceneNode* parent,
       DrawableGroup* drawables,
       std::vector<scene::SceneNode*>& visNodeCache,
@@ -556,9 +442,12 @@ class ResourceManager {
   void createDrawable(Mn::GL::Mesh* mesh,
                       gfx::Drawable::Flags& meshAttributeFlags,
                       scene::SceneNode& node,
-                      const Mn::ResourceKey& lightSetupKey,
-                      const Mn::ResourceKey& materialKey,
-                      DrawableGroup* group = nullptr);
+                      gfx::DrawableConfiguration& drawableCfg);
+
+  // const Mn::ResourceKey& lightSetupKey,
+  // const Mn::ResourceKey& materialKey,
+  // DrawableGroup* group = nullptr,
+  // const std::shared_ptr<gfx::InstanceSkinData>& skinData = nullptr);
 
   /**
    * @brief Remove the specified primitive mesh.
@@ -633,9 +522,8 @@ class ResourceManager {
    * @brief Set a replay recorder so that ResourceManager can notify it about
    * render assets.
    */
-  void setRecorder(
-      const std::shared_ptr<gfx::replay::Recorder>& gfxReplayRecorder) {
-    gfxReplayRecorder_ = gfxReplayRecorder;
+  void setRecorder(std::shared_ptr<gfx::replay::Recorder> gfxReplayRecorder) {
+    gfxReplayRecorder_ = std::move(gfxReplayRecorder);
   }
 
   /**
@@ -710,21 +598,6 @@ class ResourceManager {
   gfx::ShaderManager& getShaderManager() { return shaderManager_; }
 
   /**
-   * @brief get the shadow map manager
-   */
-  gfx::ShadowMapManager& getShadowMapManger() { return shadowManager_; }
-
-  /**
-   * @brief get the shadow map keys
-   */
-  std::map<int, std::vector<Magnum::ResourceKey>>& getShadowMapKeys() {
-    return shadowMapKeys_;
-  }
-
-  static constexpr const char* SHADOW_MAP_KEY_TEMPLATE =
-      "scene_id={}-light_id={}";
-
-  /**
    * @brief Build data for a report for semantic mesh connected components based
    * on color/id.  Returns map of data keyed by SemanticObject index in
    * SemanticObjs array.
@@ -732,18 +605,74 @@ class ResourceManager {
   std::unordered_map<uint32_t,
                      std::vector<std::shared_ptr<scene::CCSemanticObject>>>
   buildSemanticCCObjects(
-      const metadata::attributes::StageAttributes::ptr& stageAttributes);
+      const std::shared_ptr<metadata::attributes::StageAttributes>&
+          stageAttributes);
 
   /**
    * @brief Build data for a report for vertex color mapping to semantic scene
    * objects - this list of strings will disclose which colors are found in
-   * vertices but not in semantic scene descirptors, and which semantic objects
+   * vertices but not in semantic scene descriptors, and which semantic objects
    * do not have their colors mapped in mesh verts.
    */
   std::vector<std::string> buildVertexColorMapReport(
-      const metadata::attributes::StageAttributes::ptr& stageAttributes);
+      const std::shared_ptr<metadata::attributes::StageAttributes>&
+          stageAttributes);
+
+  /**
+   * @brief Get the count of Drawables and the total face count across all
+   * Drawables in the scene. This is helpful for troubleshooting runtime perf.
+   * See also resetDrawableCountAndNumFaces.
+   */
+  auto getDrawableCountAndNumFaces() { return drawableCountAndNumFaces_; }
+
+  /**
+   * @brief Reset this count and this number. See also
+   * getDrawableCountAndNumFaces.
+   */
+  void resetDrawableCountAndNumFaces() { drawableCountAndNumFaces_ = {0, 0}; }
 
  private:
+  /**
+   * @brief Retrieve the appropriate @ref eps::gfx::PbrIBLHelper for the passed
+   * @p pbrShaderAAttributes , building it first if necessary. Loads the brdf
+   * LUT and envmap requested by @p pbrShaderAttr into textures if necessary
+   * (caching them if they have not already been loaded), use them to build
+   * a @ref eps::gfx::PbrIBLHelper and place this helper in the @p pbrIBLHelpers_
+   * map, and return it as well.
+   * @param pbrShaderAttr The PBR/IBL Shader configuration whose IBL components
+   * are being loaded.
+   * @return a shared pointer to the PbrIBLHelper requested
+   */
+  std::shared_ptr<gfx::PbrIBLHelper> getOrBuildPBRIBLHelper(
+      const std::shared_ptr<metadata::attributes::PbrShaderAttributes>&
+          pbrShaderAttr);
+
+  /**
+   * @brief Load images by filename into a properly formatted texture, cache
+   * them and return them. This function will retrieve a loaded texture
+   * constructed from the requested image given by @p imageFilename if it
+   * exists. If it does not exist, it will load the image, either using the
+   * passed resource file if it exists there or else loading the image from disk
+   * and then convert it to an appropriately configured texture, based on
+   * whether it is a brdf look-up table or an environment map, save this
+   * texture in @ref iblBLUTsAndEnvMaps_, and return it.
+   *
+   * Use this function to retrieve existing IBL bLUT/EnvMap textures as well as
+   * to create new ones.
+   *
+   * @param imageFilename The image's filename, either fully qualified or else
+   * as it appears in the resource file.
+   * @param useImageTxtrFormat Whether to use the image's texture format or use
+   * RGBA8 as the format (i.e. for brdfLUTs).
+   * @param rs A Corrade resource file holding the available precompiled image
+   * resources.
+   * @return A shared pointer to the 2d texture built from the loaded image.
+   */
+  std::shared_ptr<Mn::GL::Texture2D> loadIBLImageIntoTexture(
+      const std::string& imageFilename,
+      bool useImageTxtrFormat,
+      const Cr::Utility::Resource& rs);
+
   /**
    * @brief Load the requested mesh info into @ref meshInfo corresponding to
    * specified @p assetType used by object described by @p objectAttributes
@@ -758,7 +687,8 @@ class ResourceManager {
    */
   bool loadObjectMeshDataFromFile(
       const std::string& filename,
-      const metadata::attributes::ObjectAttributes::ptr& objectAttributes,
+      const std::shared_ptr<metadata::attributes::ObjectAttributes>&
+          objectAttributes,
       const std::string& meshType,
       bool forceFlatShading);
 
@@ -772,11 +702,40 @@ class ResourceManager {
   void buildPrimitiveAssetData(const std::string& primTemplateHandle);
 
   /**
+   * @brief this will build a Phong @ref Magnum::Trade::MaterialData using
+   * default attributes from deprecated/removed esp::gfx::PhongMaterialData.
+   * @return The new phong color populated with default values
+   */
+  Mn::Trade::MaterialData buildDefaultPhongMaterial();
+
+  /**
+   * @brief Define and set user-defined attributes for the passed
+   * @ref Magnum::Trade::MaterialData.
+   * @param material The material to initialize with the expected
+   * Habitat-specific user-defined attributes.
+   * @param shaderTypeToUse What shader to use to render the objects with this
+   * material. May not be the same as the material type.
+   * @param hasVertObjID Whether or not the material has vertex-based object ids
+   * for semantics.
+   * @param hasTxtrObjID Whether or not the material has texture-based object
+   * ids for semantics.
+   * @param txtrIdx The absolute index in the @ref textures_ store for the semantic
+   * annotation texture.
+   * @return the updated material
+   */
+  Mn::Trade::MaterialData setMaterialDefaultUserAttributes(
+      const Mn::Trade::MaterialData& material,
+      ObjectInstanceShaderType shaderTypeToUse,
+      bool hasVertObjID = false,
+      bool hasTxtrObjID = false,
+      int txtrIdx = -1) const;
+
+  /**
    * @brief Configure the importerManager_ GL Extensions appropriately based on
    * compilation flags, before any general assets are imported.  This should
    * only occur if a gl context exists.
    */
-  void ConfigureImporterManagerGLExtensions();
+  void configureImporterManagerGLExtensions();
 
  protected:
   // ======== Structs and Types only used locally ========
@@ -793,13 +752,8 @@ class ResourceManager {
   /**
    * node: drawable's scene node
    *
-   * meshID:
-   * -) for non-ptex mesh:
-   * meshID is the global key into meshes_.
+   * meshID: The global key into meshes_, where
    * meshes_[meshID] is the BaseMesh corresponding to the drawable;
-   *
-   * -) for ptex mesh:
-   * meshID is the index of the submesh corresponding to the drawable;
    */
   struct StaticDrawableInfo {
     esp::scene::SceneNode& node;
@@ -816,6 +770,7 @@ class ResourceManager {
   inline bool isRenderAssetGeneral(AssetType type) {
     return type == AssetType::MP3D_MESH || type == AssetType::UNKNOWN;
   }
+
   /**
    * @brief Recursive construction of scene nodes for an asset.
    *
@@ -837,15 +792,36 @@ class ResourceManager {
    * @param computeAbsoluteAABBs whether absolute bounding boxes should be
    * computed
    * @param staticDrawableInfo structure holding the drawable infos for aabbs
+   * @param skinData structure holding the skin and rig configuration for the
+   * instance
    */
-  void addComponent(const MeshMetaData& metaData,
-                    scene::SceneNode& parent,
-                    const Mn::ResourceKey& lightSetupKey,
-                    DrawableGroup* drawables,
-                    const MeshTransformNode& meshTransformNode,
-                    std::vector<scene::SceneNode*>& visNodeCache,
-                    bool computeAbsoluteAABBs,
-                    std::vector<StaticDrawableInfo>& staticDrawableInfo);
+  void addComponent(
+      const MeshMetaData& metaData,
+      scene::SceneNode& parent,
+      const Mn::ResourceKey& lightSetupKey,
+      DrawableGroup* drawables,
+      const MeshTransformNode& meshTransformNode,
+      std::vector<scene::SceneNode*>& visNodeCache,
+      bool computeAbsoluteAABBs,
+      std::vector<StaticDrawableInfo>& staticDrawableInfo,
+      const std::shared_ptr<gfx::InstanceSkinData>& skinData = nullptr);
+
+  /**
+   * @brief Recursive construction of instance skinning data.
+   *
+   * Fills the fields of a @ref InstanceSkinData to enable skinned mesh rendering
+   * by associating each bone to a corresponding articulated object link.
+   *
+   * @param meshTransformNode The @ref MeshTransformNode being traversed.
+   * @param creationInfo Creation information for the instance which contains
+   * the rig.
+   * @param skinData Structure holding the skin and rig configuration for the
+   * instance.
+   */
+  void mapSkinnedModelToArticulatedObject(
+      const MeshTransformNode& meshTransformNode,
+      const std::shared_ptr<physics::ArticulatedObject>& rig,
+      const std::shared_ptr<gfx::InstanceSkinData>& skinData);
 
   /**
    * @brief Load textures from importer into assets, and update metaData for
@@ -867,6 +843,15 @@ class ResourceManager {
    * @param loadedAssetData The asset's @ref LoadedAssetData object.
    */
   void loadMeshes(Importer& importer, LoadedAssetData& loadedAssetData);
+
+  /**
+   * @brief Load skins from importer into assets.
+   *
+   * @param importer The importer already loaded with information for the
+   * asset.
+   * @param loadedAssetData The asset's @ref LoadedAssetData object.
+   */
+  void loadSkins(Importer& importer, LoadedAssetData& loadedAssetData);
 
   /**
    * @brief Recursively build a unified @ref MeshData from loaded assets via a
@@ -928,7 +913,7 @@ class ResourceManager {
   /**
    * @brief Boolean check if @p typeToCheck aligns with passed types explicitly
    * specified, or type in material
-   * @param typeToCheck The ObjectInstanceShaderType value beign queried for.
+   * @param typeToCheck The ObjectInstanceShaderType value being queried for.
    * @param materialData The material whose type we are verifying against
    * @param verificationType The ObjectInstanceShaderType we are verifying
    * against
@@ -938,50 +923,51 @@ class ResourceManager {
    * criteria.
    */
   bool checkForPassedShaderType(
-      const ObjectInstanceShaderType typeToCheck,
+      ObjectInstanceShaderType typeToCheck,
       const Mn::Trade::MaterialData& materialData,
-      const ObjectInstanceShaderType verificationType,
-      const Mn::Trade::MaterialType mnVerificationType) const {
-    return (
-        (typeToCheck == verificationType) ||
-        ((typeToCheck == ObjectInstanceShaderType::Material) &&
-         ((materialData.types() & mnVerificationType) == mnVerificationType)));
-  }
+      ObjectInstanceShaderType verificationType,
+      Mn::Trade::MaterialType mnVerificationType) const;
 
   /**
-   * @brief Build a @ref PhongMaterialData for use with flat shading
+   * @brief Build a @ref Magnum::Trade::MaterialData for use with Flat shading
+   * that holds all custom attributes except texture pointers.
+   * Note : habitat-sim currently uses the Phong shader for Flat materials.
    *
    * Textures must already be loaded for the asset this material belongs to
    *
    * @param material Material data with texture IDs
-   * @param textureBaseIndex Base index of the assets textures in textures_
+   * @param textureBaseIndex Base index of the assets textures in @ref textures_
+   * store
    */
-  gfx::PhongMaterialData::uptr buildFlatShadedMaterialData(
+  Mn::Trade::MaterialData buildCustomAttributeFlatMaterial(
       const Mn::Trade::MaterialData& materialData,
       int textureBaseIndex);
 
   /**
-   * @brief Build a @ref PhongMaterialData for use with phong shading
+   * @brief Build a @ref Magnum::Trade::MaterialData for use with Phong shading
+   * that holds all custom attributes except texture pointers.
    *
    * Textures must already be loaded for the asset this material belongs to
    *
    * @param material Material data with texture IDs
-   * @param textureBaseIndex Base index of the assets textures in textures_
-
+   * @param textureBaseIndex Base index of the assets textures in @ref textures_
+   * store
    */
-  gfx::PhongMaterialData::uptr buildPhongShadedMaterialData(
+  Mn::Trade::MaterialData buildCustomAttributePhongMaterial(
       const Mn::Trade::MaterialData& material,
       int textureBaseIndex) const;
 
   /**
-   * @brief Build a @ref PbrMaterialData for use with PBR shading
+   * @brief Build a @ref Magnum::Trade::MaterialData for use with PBR shading
+   * that holds all custom attributes except texture pointers.
    *
    * Textures must already be loaded for the asset this material belongs to
    *
    * @param material Material data with texture IDs
-   * @param textureBaseIndex Base index of the assets textures in textures_
+   * @param textureBaseIndex Base index of the assets textures in @ref textures_
+   * store
    */
-  gfx::PbrMaterialData::uptr buildPbrShadedMaterialData(
+  Mn::Trade::MaterialData buildCustomAttributePbrMaterial(
       const Mn::Trade::MaterialData& material,
       int textureBaseIndex) const;
 
@@ -1030,14 +1016,10 @@ class ResourceManager {
    * created
    */
   std::map<std::string, AssetInfo> createStageAssetInfosFromAttributes(
-      const metadata::attributes::StageAttributes::ptr& stageAttributes,
+      const std::shared_ptr<metadata::attributes::StageAttributes>&
+          stageAttributes,
       bool createCollisionInfo,
       bool createSemanticInfo);
-
-  /**
-   * @brief PTex Mesh backend for loadRenderAsset
-   */
-  bool loadRenderAssetPTex(const AssetInfo& info);
 
   /**
    * @brief Build @ref GenericSemanticMeshData from a single, flattened Magnum
@@ -1048,7 +1030,7 @@ class ResourceManager {
    * @param info AssetInfo describing asset.
    * @return The GenericSemanticMeshData being built.
    */
-  GenericSemanticMeshData::uptr flattenImportedMeshAndBuildSemantic(
+  std::unique_ptr<GenericSemanticMeshData> flattenImportedMeshAndBuildSemantic(
       Importer& fileImporter,
       const AssetInfo& info);
 
@@ -1088,14 +1070,6 @@ class ResourceManager {
       std::vector<scene::SceneNode*>* visNodeCache = nullptr);
 
   /**
-   * @brief PTex Mesh backend for createRenderAssetInstance
-   */
-  scene::SceneNode* createRenderAssetInstancePTex(
-      const RenderAssetInstanceCreationInfo& creation,
-      scene::SceneNode* parent,
-      DrawableGroup* drawables);
-
-  /**
    * @brief Semantic Mesh backend creation. Either use
    * createRenderAssetInstanceVertSemantic if semantic mesh has vertex
    * annotations only, or createRenderAssetInstanceGeneralPrimitive if semantic
@@ -1132,19 +1106,6 @@ class ResourceManager {
   void initDefaultLightSetups();
 
   /**
-   * @brief initialize pbr image based lighting
-   * @param[in] hdriImageFilename, the name of the
-   * HDRi image (an equirectangular image), that will be converted to a
-   * environment cube map
-   * NOTE!!! Such an image MUST be SPECIFIED in the
-   * ~/habitat-sim/data/pbr/PbrImages.conf
-   * and be put in that folder.
-   * example image:
-   * ~/habitat-sim/data/pbr/lythwood_room_4k.png
-   */
-  void initPbrImageBasedLighting(const std::string& hdriImageFilename);
-
-  /**
    * @brief initialize default material setups in the current ShaderManager
    */
   void initDefaultMaterials();
@@ -1165,17 +1126,6 @@ class ResourceManager {
    */
   Mn::Range3D computeMeshBB(BaseMesh* meshDataGL);
 
-#ifdef ESP_BUILD_PTEX_SUPPORT
-  /**
-   * @brief Compute the absolute AABBs for drawables in PTex mesh in world
-   * space
-   * @param baseMesh ptex mesh
-   */
-  void computePTexMeshAbsoluteAABBs(
-      BaseMesh& baseMesh,
-      const std::vector<StaticDrawableInfo>& staticDrawableInfo);
-#endif
-
   /**
    * @brief Compute the absolute AABBs for drawables in general mesh (e.g.,
    * MP3D) world space
@@ -1191,15 +1141,11 @@ class ResourceManager {
       const std::vector<StaticDrawableInfo>& staticDrawableInfo);
 
   /**
-   * @brief Compute absolute transformations of all drwables stored in
+   * @brief Compute absolute transformations of all drawables stored in
    * staticDrawableInfo_
    */
   std::vector<Mn::Matrix4> computeAbsoluteTransformations(
       const std::vector<StaticDrawableInfo>& staticDrawableInfo);
-
-  // ======== Rendering Utility Functions ========
-
-  Flags flags_;
 
   // ======== General geometry data ========
   // shared_ptr is used here, instead of Corrade::Containers::Optional, or
@@ -1215,6 +1161,7 @@ class ResourceManager {
    * @brief The mesh data for loaded assets.
    */
   std::map<int, std::shared_ptr<BaseMesh>> meshes_;
+  std::pair<int, int> drawableCountAndNumFaces_{0, 0};
 
   /**
    * @brief The next available unique ID for loaded textures
@@ -1232,12 +1179,14 @@ class ResourceManager {
   int nextMaterialID_ = 0;
 
   /**
-   * @brief Storage for precomuted voxel grids. Useful for when multiple objects
-   * in a scene are using the same VoxelGrid.
-   *
-   * Maps absolute path keys to VoxelGrid.
+   * @brief The next available unique ID for loaded skins
    */
-  std::map<std::string, std::shared_ptr<esp::geo::VoxelGrid>> voxelGridDict_;
+  int nextSkinID_ = 0;
+
+  /**
+   * @brief The skin data for loaded assets.
+   */
+  std::map<int, std::shared_ptr<gfx::SkinData>> skins_;
 
   /**
    * @brief Asset metadata linking meshes, textures, materials, and the
@@ -1258,7 +1207,7 @@ class ResourceManager {
    * @brief A reference to the MetadataMediator managing all the metadata
    * currently in use.
    */
-  metadata::MetadataMediator::ptr metadataMediator_ = nullptr;
+  std::shared_ptr<metadata::MetadataMediator> metadataMediator_ = nullptr;
   /**
    * @brief Plugin Manager used to instantiate importers which in turn are used
    * to load asset data
@@ -1274,7 +1223,7 @@ class ResourceManager {
    * being rendered, since that mesh will have its components moved into actual
    * render mesh constructs.
    */
-  GenericSemanticMeshData::uptr infoSemanticMeshData_{};
+  std::unique_ptr<GenericSemanticMeshData> infoSemanticMeshData_;
 
   /**
    * @brief Importer used to synthesize Magnum Primitives (PrimitiveImporter).
@@ -1287,6 +1236,11 @@ class ResourceManager {
    * @brief Importer used to load generic mesh files (AnySceneImporter)
    */
   Corrade::Containers::Pointer<Importer> fileImporter_;
+
+  /**
+   * @brief Importer used to load images (AnyImageImporter)
+   */
+  Corrade::Containers::Pointer<Importer> imageImporter_;
 
   /**
    * @brief Reference to the currently loaded semanticScene Descriptor
@@ -1326,25 +1280,21 @@ class ResourceManager {
   std::shared_ptr<esp::gfx::replay::Recorder> gfxReplayRecorder_;
 
   /**
-   * @brief The imaged based lighting for PBR, each is a collection of
+   * @brief Helper objects that calculate and manage assets for IBL :
    * an environment map, an irradiance map, a BRDF lookup table (2D texture),
-   * and a pre-fitered map
+   * and a pre-filtered map
    */
-  std::vector<std::unique_ptr<esp::gfx::PbrImageBasedLighting>>
-      pbrImageBasedLightings_;
-
-  int activePbrIbl_ = ID_UNDEFINED;
+  std::unordered_map<std::string, std::shared_ptr<esp::gfx::PbrIBLHelper>>
+      pbrIBLHelpers_;
 
   /**
-   * @brief shadow map for point lights
+   * @brief Map of brdf Lookup table textures and environment map textures
+   * loaded already to be used for IBL.
    */
-  // TODO: directional light shadow maps
-  gfx::ShadowMapManager shadowManager_;
-  // scene graph id -> keys for the shadow maps
-  std::map<int, std::vector<Magnum::ResourceKey>> shadowMapKeys_;
-};  // namespace assets
+  std::unordered_map<std::string, std::shared_ptr<Mn::GL::Texture2D>>
+      iblBLUTsAndEnvMaps_{};
 
-CORRADE_ENUMSET_OPERATORS(ResourceManager::Flags)
+};  // class ResourceManager
 
 }  // namespace assets
 }  // namespace esp

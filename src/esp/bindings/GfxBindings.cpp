@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -11,9 +11,8 @@
 #include <Magnum/PythonBindings.h>
 #include <Magnum/SceneGraph/PythonBindings.h>
 
-#include "python/corrade/EnumOperators.h"
-
 #include "esp/assets/ResourceManager.h"
+#include "esp/bindings/EnumOperators.h"
 #include "esp/gfx/DebugLineRender.h"
 #include "esp/gfx/LightSetup.h"
 #include "esp/gfx/RenderCamera.h"
@@ -55,7 +54,7 @@ void initGfxBindings(py::module& m) {
   flags.value("FRUSTUM_CULLING", RenderCamera::Flag::FrustumCulling)
       .value("OBJECTS_ONLY", RenderCamera::Flag::ObjectsOnly)
       .value("NONE", RenderCamera::Flag{});
-  corrade::enumOperators(flags);
+  pybindEnumOperators(flags);
 
   render_camera
       .def(py::init_alias<std::reference_wrapper<scene::SceneNode>,
@@ -73,8 +72,8 @@ void initGfxBindings(py::module& m) {
            "height"_a, "znear"_a, "zfar"_a, "scale"_a)
       .def(
           "unproject", &RenderCamera::unproject,
-          R"(Unproject a 2D viewport point to a 3D ray with its origin at the camera position.)",
-          "viewport_point"_a)
+          R"(Unproject a 2D viewport point to a 3D ray with its origin at the camera position. Ray direction is optionally normalized. Non-normalized rays originate at the camera location and terminate at a view plane one unit down the Z axis.)",
+          "viewport_point"_a, "normalized"_a = true)
       .def_property_readonly("node", nodeGetter<RenderCamera>,
                              "Node this object is attached to")
       .def_property_readonly("object", nodeGetter<RenderCamera>,
@@ -87,7 +86,7 @@ void initGfxBindings(py::module& m) {
 
   rendererFlags.value("VISUALIZE_TEXTURE", Renderer::Flag::VisualizeTexture)
       .value("NONE", Renderer::Flag{});
-  corrade::enumOperators(rendererFlags);
+  pybindEnumOperators(rendererFlags);
 
   renderer.def(py::init(&Renderer::create<>))
       .def(

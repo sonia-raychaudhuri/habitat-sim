@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -10,12 +10,15 @@
 #include <Corrade/Utility/Path.h>
 #include <Magnum/EigenIntegration/Integration.h>
 #include <Magnum/Math/Range.h>
+#include <Magnum/Trade/MaterialData.h>
 #include <string>
 
+#include "esp/assets/MeshData.h"
 #include "esp/assets/RenderAssetInstanceCreationInfo.h"
 #include "esp/assets/ResourceManager.h"
 #include "esp/gfx/Renderer.h"
 #include "esp/gfx/WindowlessContext.h"
+#include "esp/metadata/MetadataMediator.h"
 #include "esp/metadata/attributes/AttributesBase.h"
 #include "esp/scene/SceneManager.h"
 
@@ -35,10 +38,6 @@ struct ResourceManagerTest : Cr::TestSuite::Tester {
   explicit ResourceManagerTest();
   void createJoinedCollisionMesh();
 
-#ifdef ESP_BUILD_WITH_VHACD
-  void VHACDUsageTest();
-#endif
-
   void loadAndCreateRenderAssetInstance();
 
   void testShaderTypeSpecification();
@@ -48,9 +47,6 @@ struct ResourceManagerTest : Cr::TestSuite::Tester {
 ResourceManagerTest::ResourceManagerTest() {
   addTests({
       &ResourceManagerTest::createJoinedCollisionMesh,
-#ifdef ESP_BUILD_WITH_VHACD
-      &ResourceManagerTest::VHACDUsageTest,
-#endif
       &ResourceManagerTest::loadAndCreateRenderAssetInstance,
       &ResourceManagerTest::testShaderTypeSpecification,
   });
@@ -118,54 +114,6 @@ void ResourceManagerTest::createJoinedCollisionMesh() {
 
 }  // namespace Test
 
-#ifdef ESP_BUILD_WITH_VHACD
-void ResourceManagerTest::VHACDUsageTest() {
-  esp::gfx::WindowlessContext::uptr context_ =
-      esp::gfx::WindowlessContext::create_unique(0);
-
-  std::shared_ptr<esp::gfx::Renderer> renderer_ = esp::gfx::Renderer::create();
-
-  // must declare these in this order due to avoid deallocation errors
-  // must declare these in this order due to avoid deallocation errors
-  auto cfg = esp::sim::SimulatorConfiguration{};
-  // setting values for stage load
-  cfg.loadSemanticMesh = false;
-  cfg.forceSeparateSemanticSceneGraph = false;
-  auto MM = MetadataMediator::create(cfg);
-  ResourceManager resourceManager(MM);
-  SceneManager sceneManager_;
-  auto stageAttributesMgr = MM->getStageAttributesManager();
-  std::string donutFile =
-      Cr::Utility::Path::join(TEST_ASSETS, "objects/donut.glb");
-  std::string CHdonutFile =
-      Cr::Utility::Path::join(TEST_ASSETS, "objects/CHdonut.glb");
-
-  // create stage attributes file
-  auto stageAttributes = stageAttributesMgr->createObject(donutFile, true);
-
-  int sceneID = sceneManager_.initSceneGraph();
-  auto& sceneGraph = sceneManager_.getSceneGraph(sceneID);
-  const esp::assets::AssetInfo info =
-      esp::assets::AssetInfo::fromPath(donutFile);
-
-  std::vector<int> tempIDs{sceneID, esp::ID_UNDEFINED};
-  bool result = resourceManager.loadStage(stageAttributes, nullptr, nullptr,
-                                          &sceneManager_, tempIDs);
-
-  esp::assets::MeshData::uptr joinedBox =
-      resourceManager.createJoinedCollisionMesh(donutFile);
-
-  esp::assets::ResourceManager::VHACDParameters params;
-  // params.setMaxNumVerticesPerCH(10);
-  params.m_resolution = 1000000;
-  CORRADE_VERIFY(!resourceManager.isAssetDataRegistered(CHdonutFile));
-  resourceManager.createConvexHullDecomposition(donutFile, CHdonutFile, params,
-                                                true);
-
-  CORRADE_VERIFY(resourceManager.isAssetDataRegistered(CHdonutFile));
-}
-#endif
-
 // Load and create a render asset instance and assert success
 void ResourceManagerTest::loadAndCreateRenderAssetInstance() {
   esp::gfx::WindowlessContext::uptr context_ =
@@ -227,7 +175,7 @@ void buildMaterialIDs(const esp::assets::MeshTransformNode& root,
  * ResourceManager.  We need to rebuild every test so that we force reload of
  * assets.
  */
-void testAssetTypeMatch(int specifiedAssetType,
+void testAssetTypeMatch(ObjectInstanceShaderType specifiedAssetType,
                         const esp::assets::AssetInfo& info,
                         std::shared_ptr<esp::metadata::MetadataMediator> MM) {
   ResourceManager resourceManager(MM);
@@ -245,16 +193,18 @@ void testAssetTypeMatch(int specifiedAssetType,
   ESP_DEBUG() << "# Materials specified in asset:" << matIDs.size();
   CORRADE_COMPARE(matIDs.size(), 3);
 
+  int specifiedAssetTypeInt = static_cast<int>(specifiedAssetType);
   // get shaderManager from RM and check material @ material ID
   auto& shaderManager = resourceManager.getShaderManager();
   // all materials specified in the hierarchy should match the material for the
   // desired shadertype.
   for (const std::string id : matIDs) {
     int shaderTypeSpec =
-        shaderManager.get<esp::gfx::MaterialData>(id)->shaderTypeSpec;
+        shaderManager.get<Mn::Trade::MaterialData>(id)->attribute<int>(
+            "shaderTypeToUse");
     ESP_DEBUG() << "mat ID : " << id << "type spec in mat :" << shaderTypeSpec
-                << " | spec in asset :" << specifiedAssetType;
-    CORRADE_COMPARE(shaderTypeSpec, specifiedAssetType);
+                << " | spec in asset :" << specifiedAssetTypeInt;
+    CORRADE_COMPARE(shaderTypeSpec, specifiedAssetTypeInt);
   }
 }  // testAssetTypeMatch
 
@@ -276,32 +226,29 @@ void ResourceManagerTest::testShaderTypeSpecification() {
   // force flat shading
   info.forceFlatShading = true;
   // object's material type is flat
-  testAssetTypeMatch(static_cast<int>(ObjectInstanceShaderType::Flat), info,
-                     MM);
+  testAssetTypeMatch(ObjectInstanceShaderType::Flat, info, MM);
   ESP_DEBUG() << "Testing Material type, which is PBR for this asset.";
 
   // enable lightig and use material type
   info.forceFlatShading = false;
   info.shaderTypeToUse = ObjectInstanceShaderType::Material;
   // object's material type is PBR
-  testAssetTypeMatch(static_cast<int>(ObjectInstanceShaderType::PBR), info, MM);
+  testAssetTypeMatch(ObjectInstanceShaderType::PBR, info, MM);
 
   ESP_DEBUG() << "Testing PBR explicitly being set.";
   // force pbr
   info.shaderTypeToUse = ObjectInstanceShaderType::PBR;
-  testAssetTypeMatch(static_cast<int>(ObjectInstanceShaderType::PBR), info, MM);
+  testAssetTypeMatch(ObjectInstanceShaderType::PBR, info, MM);
 
   ESP_DEBUG() << "Testing Phong explicitly being set.";
   // force phong
   info.shaderTypeToUse = ObjectInstanceShaderType::Phong;
-  testAssetTypeMatch(static_cast<int>(ObjectInstanceShaderType::Phong), info,
-                     MM);
+  testAssetTypeMatch(ObjectInstanceShaderType::Phong, info, MM);
 
   ESP_DEBUG() << "Testing Flat explicitly being set.";
   // force flat via shadertype
   info.shaderTypeToUse = ObjectInstanceShaderType::Flat;
-  testAssetTypeMatch(static_cast<int>(ObjectInstanceShaderType::Flat), info,
-                     MM);
+  testAssetTypeMatch(ObjectInstanceShaderType::Flat, info, MM);
 
 }  // ResourceManagerTest::testFlatShaderTypeSpecification
 

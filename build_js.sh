@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 # Propagate failures properly
 set -e
 
@@ -22,8 +26,7 @@ cmake ../src \
     -DBUILD_GUI_VIEWERS=OFF \
     -DBUILD_PYTHON_BINDINGS=OFF \
     -DBUILD_ASSIMP_SUPPORT=OFF \
-    -DBUILD_DATATOOL=OFF \
-    -DBUILD_PTEX_SUPPORT=OFF
+    -DBUILD_DATATOOL=OFF
 cmake --build . --target corrade-rc --
 popd
 
@@ -38,7 +41,6 @@ cmake ../src \
     -DBUILD_PYTHON_BINDINGS=OFF \
     -DBUILD_ASSIMP_SUPPORT=OFF \
     -DBUILD_DATATOOL=OFF \
-    -DBUILD_PTEX_SUPPORT=OFF \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$EMSCRIPTEN" \
     -DCMAKE_TOOLCHAIN_FILE="../src/deps/corrade/toolchains/generic/Emscripten-wasm.cmake" \
@@ -62,4 +64,3 @@ if [ -o ${WEB_APPS} ]
     echo "Then open in a browser:"
     echo "http://0.0.0.0:8000/build_js/esp/bindings_js/bindings.html?scene=skokloster-castle.glb"
 fi
-

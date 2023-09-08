@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -221,7 +221,7 @@ class FairmotionInterface:
                     break
 
                 # we are no longer overwriting a file
-                elif "/" not in file:
+                if "/" not in file:
                     # file is not a file path, we need to aim it at our directory
                     if ".json" not in file:
                         # add file type
@@ -422,14 +422,14 @@ class FairmotionInterface:
                 raise KeyError(
                     "Error: pose data does not have a transform for that joint name"
                 )
-            elif joint_type not in [phy.JointType.Spherical]:
+            if joint_type not in [phy.JointType.Spherical]:
                 raise NotImplementedError(
                     f"Error: {joint_type} is not a supported joint type"
                 )
-            else:
-                T = pose.get_transform(pose_joint_index, local=True)
-                if joint_type == phy.JointType.Spherical:
-                    Q, _ = conversions.T2Qp(T)
+
+            T = pose.get_transform(pose_joint_index, local=True)
+            if joint_type == phy.JointType.Spherical:
+                Q, _ = conversions.T2Qp(T)
 
             new_pose += list(Q)
 
@@ -477,7 +477,6 @@ class FairmotionInterface:
             data = self.user_metadata
 
             for k in self.key_frames:
-
                 self.key_frame_models.append(
                     self.art_obj_mgr.add_articulated_object_from_urdf(
                         filepath=data["urdf_path"], fixed_base=True
@@ -830,7 +829,6 @@ class FairmotionInterface:
             finished_processing = False
 
             while Timer.check() < (THRESHOLD / self.draw_fps):
-
                 # get time that motion is at
                 time_ = time_ + (1.0 / self.draw_fps)
 
@@ -1063,7 +1061,6 @@ class FairmotionInterface:
         j: int = 0
 
         while i < len(path_points):
-
             progress: float = (mn.Vector3(path_points[i] - path_points[j])).length()
             if t >= progress + covered:
                 covered += progress
@@ -1115,7 +1112,6 @@ class FairmotionInterface:
 
         found_path = False
         while not found_path:
-
             while start_point is None:
                 start_point = pf.get_random_navigable_point()
                 start_point = pf.snap_point(start_point)

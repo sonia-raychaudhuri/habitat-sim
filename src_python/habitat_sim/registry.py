@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -75,8 +75,8 @@ class _Registry:
 
         if controller is None:
             return _wrapper
-        else:
-            return _wrapper(controller)
+
+        return _wrapper(controller)
 
     @classmethod
     def register_noise_model(
@@ -104,8 +104,8 @@ class _Registry:
 
         if noise_model is None:
             return _wrapper
-        else:
-            return _wrapper(noise_model)
+
+        return _wrapper(noise_model)
 
     @classmethod
     def register_pose_extractor(
@@ -133,8 +133,8 @@ class _Registry:
 
         if pose_extractor is None:
             return _wrapper
-        else:
-            return _wrapper(pose_extractor)
+
+        return _wrapper(pose_extractor)
 
     @classmethod
     def _get_impl(cls, _type, name: str):

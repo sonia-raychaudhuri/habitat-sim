@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -26,6 +26,8 @@ from habitat_sim._ext.habitat_sim_bindings import (
     GreedyGeodesicFollowerImpl,
     MultiGoalShortestPath,
     PathFinder,
+    ReplayRenderer,
+    ReplayRendererConfiguration,
     RigidState,
     RLRAudioPropagationChannelLayout,
     RLRAudioPropagationChannelLayoutType,
@@ -47,5 +49,4 @@ from habitat_sim._ext.habitat_sim_bindings import (
     audio_enabled,
     built_with_bullet,
     cuda_enabled,
-    vhacd_enabled,
 )

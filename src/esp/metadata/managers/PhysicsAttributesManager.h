@@ -1,13 +1,13 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 #ifndef ESP_METADATA_MANAGERS_PHYSICSATTRIBUTEMANAGER_H_
 #define ESP_METADATA_MANAGERS_PHYSICSATTRIBUTEMANAGER_H_
 
-#include "AttributesManagerBase.h"
+#include <utility>
 
-#include "ObjectAttributesManager.h"
+#include "AttributesManagerBase.h"
 
 #include "esp/metadata/attributes/PhysicsManagerAttributes.h"
 #include "esp/physics/configure.h"
@@ -67,16 +67,6 @@ class PhysicsAttributesManager
 
  protected:
   /**
-   * @brief Physics Manager Attributes has no reason to check this value
-   * @param handle String name of primitive asset attributes desired
-   * @return whether handle exists or not in asset attributes library
-   */
-  bool isValidPrimitiveAttributes(
-      CORRADE_UNUSED const std::string& handle) override {
-    return false;
-  }
-
-  /**
    * @brief Used Internally.  Create and configure newly-created attributes with
    * any default values, before any specific values are set.
    *
@@ -133,8 +123,8 @@ class PhysicsAttributesManager
     // adds template to library, and returns either the ID of the existing
     // template referenced by physicsAttributesHandle, or the next available ID
     // if not found.
-    int physicsTemplateID = this->addObjectToLibrary(physicsAttributesTemplate,
-                                                     physicsAttributesHandle);
+    int physicsTemplateID = this->addObjectToLibrary(
+        std::move(physicsAttributesTemplate), physicsAttributesHandle);
     return physicsTemplateID;
   }  // PhysicsAttributesManager::registerObjectFinalize
 

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -8,7 +8,11 @@
 #include <string>
 
 #include "esp/core/Esp.h"
+#include "esp/gfx/configure.h"
+#include "esp/nav/PathFinder.h"
 #include "esp/physics/configure.h"
+
+namespace Cr = Corrade;
 
 namespace esp {
 
@@ -36,7 +40,8 @@ struct SimulatorConfiguration {
    */
   bool enablePhysics = false;
   /**
-   * @brief todo
+   * @brief Enable the recording of render keyframes during simulation.
+   * These keyframes can be used later to replay the graphics of a simulation.
    */
   bool enableGfxReplaySave = false;
   /**
@@ -58,7 +63,7 @@ struct SimulatorConfiguration {
 
   /**
    * @brief Leave the context with the background thread after finishing draw
-   * jobs. This will improve performance as transfering the OpenGL context back
+   * jobs. This will improve performance as transferring the OpenGL context back
    * and forth takes time but will require the user to manually transfer the
    * context back to the main thread before adding or removing objects.
    */
@@ -82,14 +87,24 @@ struct SimulatorConfiguration {
   std::string sceneLightSetupKey = esp::NO_LIGHT_KEY;
 
   /**
-   * @brief Setup the image based lighting for pbr rendering
+   * @brief Setup the image based lighting for pbr rendering. @deprecated use
+   * configs to enable/disable IBL.
    */
   bool pbrImageBasedLighting = false;
+
   /**
    * @brief Use texture-based semantics if the specified asset/dataset support
    * them.
    */
   bool useSemanticTexturesIfFound = true;
+
+  /**
+   * @brief Optionally provide a pre-configured NavMeshSettings. If provided,
+   * the NavMesh will be recomputed with the provided settings if A. no NavMesh
+   * was loaded, or B. the loaded NavMesh's settings differ from the configured
+   * settings. If not provided, no NavMesh recompute will be done automatically.
+   */
+  nav::NavMeshSettings::ptr navMeshSettings = nullptr;
 
   ESP_SMART_POINTERS(SimulatorConfiguration)
 };

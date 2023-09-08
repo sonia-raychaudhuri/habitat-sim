@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -79,11 +79,12 @@ void BulletArticulatedObject::initializeFromURDF(
 
   auto urdfModel = u2b.getModel();
 
+  node().setSemanticId(urdfModel->getSemanticId());
+
   // cache the global scaling from the source model
   globalScale_ = urdfModel->getGlobalScaling();
 
   int urdfLinkIndex = u2b.getRootLinkIndex();
-  // int rootIndex = u2b.getRootLinkIndex();
 
   bool recursive = (u2b.flags & CUF_MAINTAIN_LINK_ORDER) == 0;
 

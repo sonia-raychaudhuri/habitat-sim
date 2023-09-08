@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -10,9 +10,10 @@
  * esp::assets::MeshMetaData
  */
 
+#include <Magnum/Math/Matrix4.h>
+#include <Magnum/Math/Quaternion.h>
 #include "esp/core/Esp.h"
 #include "esp/geo/CoordinateFrame.h"
-#include "esp/gfx/magnum.h"
 
 namespace esp {
 namespace assets {
@@ -44,6 +45,9 @@ struct MeshTransformNode {
 
   /** @brief Default constructor. */
   MeshTransformNode() = default;
+
+  /** @brief Node name in the original file. */
+  std::string name{};
 };
 
 /**
@@ -51,9 +55,8 @@ struct MeshTransformNode {
  * materials, textures, and a hierarchy of component transform relationships.
  *
  * As each type of data may contain a few items, we save the start index, and
- * the end index (of each type) as a pair. In current implementation: ptex mesh:
- * meshes_ (1 item), textures_ (0 item), materials_ (0 item); instance mesh:
- * meshes_ (1 item), textures_ (0 item), materials_ (0 item); gltf_mesh,
+ * the end index (of each type) as a pair. In current implementation: instance
+ * mesh: meshes_ (1 item), textures_ (0 item), materials_ (0 item); gltf_mesh,
  * glb_mesh: meshes_ (i items), textures (j items), materials_ (k items), i, j,
  * k = 0, 1, 2 ...
  */
@@ -72,6 +75,10 @@ struct MeshMetaData {
    * asset datastructure. */
   std::pair<start, end> textureIndex =
       std::make_pair(ID_UNDEFINED, ID_UNDEFINED);
+
+  /** @brief Index range (inclusive) of skin data for the asset in the global
+   * asset datastructure. */
+  std::pair<start, end> skinIndex = std::make_pair(ID_UNDEFINED, ID_UNDEFINED);
 
   /** @brief The root of the mesh component transformation hierarchy tree which
    * stores the relationship between components of the asset.*/
@@ -113,6 +120,19 @@ struct MeshMetaData {
   void setTextureIndices(int textureStart, int textureEnd) {
     textureIndex.first = textureStart;
     textureIndex.second = textureEnd;
+  }
+
+  /**
+   * @brief Sets the skin indices for the asset. See @ref
+   * ResourceManager::skins_.
+   * @param skinStart First index for asset skin data in the global
+   * skin datastructure.
+   * @param skinEnd Final index for asset skin data in the global skin
+   * datastructure.
+   */
+  void setSkinIndices(int skinStart, int skinEnd) {
+    skinIndex.first = skinStart;
+    skinIndex.second = skinEnd;
   }
 
   /**

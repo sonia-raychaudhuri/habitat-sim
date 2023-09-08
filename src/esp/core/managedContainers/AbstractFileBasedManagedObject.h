@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -6,6 +6,7 @@
 #define ESP_CORE_ABSTRACTFILEBASEDMANAGEDOBJECT_H_
 
 #include <Corrade/Containers/Pair.h>
+#include <Corrade/Containers/StringStl.h>
 #include <Corrade/Utility/Path.h>
 #include <string>
 #include "AbstractManagedObject.h"

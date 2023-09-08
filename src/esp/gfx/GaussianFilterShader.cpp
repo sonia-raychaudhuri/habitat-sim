@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -18,7 +18,7 @@ namespace Cr = Corrade;
 namespace Mn = Magnum;
 
 static void importShaderResources() {
-  CORRADE_RESOURCE_INITIALIZE(ShaderResources)
+  CORRADE_RESOURCE_INITIALIZE(GfxShaderResources)
 }
 
 namespace esp {
@@ -29,11 +29,11 @@ enum {
 };
 
 GaussianFilterShader::GaussianFilterShader() {
-  if (!Corrade::Utility::Resource::hasGroup("default-shaders")) {
+  if (!Corrade::Utility::Resource::hasGroup("gfx-shaders")) {
     importShaderResources();
   }
 
-  const Corrade::Utility::Resource rs{"default-shaders"};
+  const Corrade::Utility::Resource rs{"gfx-shaders"};
 
 #ifdef MAGNUM_TARGET_WEBGL
   Mn::GL::Version glVersion = Mn::GL::Version::GLES300;
@@ -52,7 +52,7 @@ GaussianFilterShader::GaussianFilterShader() {
           "#define OUTPUT_ATTRIBUTE_LOCATION_COLOR {}\n", ColorOutput))
       .addSource(rs.getString("gaussianFilter.frag"));
 
-  CORRADE_INTERNAL_ASSERT_OUTPUT(Mn::GL::Shader::compile({vert, frag}));
+  CORRADE_INTERNAL_ASSERT_OUTPUT(vert.compile() && frag.compile());
 
   attachShaders({vert, frag});
 

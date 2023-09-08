@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -34,7 +34,8 @@ std::string ManagedContainerBase::getRandomObjectHandlePerType(
   std::size_t numVals = mapOfHandles.size();
   if (numVals == 0) {
     ESP_ERROR() << "Attempting to get a random" << type << objectType_
-                << "managed object handle but none are loaded; Aboring";
+                << "managed object handle but none are loaded, so no handles "
+                   "will be returned.";
     return "";
   }
   int randIDX = rand() % numVals;
@@ -177,7 +178,7 @@ int ManagedContainerBase::getObjectIDByHandleOrNew(
     ESP_ERROR(Magnum::Debug::Flag::NoSpace)
         << "<" << this->objectType_ << "> : No " << objectType_
         << " managed object with handle " << objectHandle
-        << " exists. Aborting.";
+        << " exists, so aborting ID query.";
     return ID_UNDEFINED;
   }
   return getUnusedObjectID();

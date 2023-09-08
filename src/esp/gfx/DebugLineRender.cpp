@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -91,6 +91,11 @@ void DebugLineRender::setLineWidth(float lineWidth) {
 void DebugLineRender::flushLines(const Magnum::Matrix4& camMatrix,
                                  const Magnum::Matrix4& projMatrix,
                                  const Magnum::Vector2i& viewport) {
+  flushLines(projMatrix * camMatrix, viewport);
+}
+
+void DebugLineRender::flushLines(const Magnum::Matrix4& projCamMatrix,
+                                 const Magnum::Vector2i& viewport) {
   CORRADE_ASSERT(_glResources,
                  "DebugLineRender::flushLines: no GL resources; see "
                  "also releaseGLResources", );
@@ -134,7 +139,7 @@ void DebugLineRender::flushLines(const Magnum::Matrix4& camMatrix,
                                  Mn::Vector3(0, x * sqrtOfTwo, 0),
                                  Mn::Vector3(0, -x * sqrtOfTwo, 0)};
 
-  Mn::Matrix4 projCam = projMatrix * camMatrix;
+  const auto& projCam = projCamMatrix;
 
   auto submitLinesWithOffsets = [&]() {
     for (const auto& offset : offsets) {
@@ -275,7 +280,7 @@ void DebugLineRender::drawPathWithEndpointCircles(
   drawCircle(end1, radius, color, numSegments, normal);
 
   Mn::Vector3 prevPos;
-  for (int i = 0; i < points.size(); ++i) {
+  for (size_t i = 0; i < points.size(); ++i) {
     const auto& pos = points[i];
     if (i > 0) {
       if ((prevPos - end0).length() > radius &&

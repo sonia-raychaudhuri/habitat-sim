@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -21,8 +21,8 @@ import habitat_sim
 import habitat_sim.physics as phy
 from examples.fairmotion_interface import FairmotionInterface
 from examples.fairmotion_interface_utils import Activity
-from examples.settings import default_sim_settings, make_cfg
 from habitat_sim.logging import logger
+from habitat_sim.utils.settings import default_sim_settings, make_cfg
 
 
 class FairmotionSimInteractiveViewer(HabitatSimInteractiveViewer):
@@ -584,10 +584,10 @@ class FairmotionSimInteractiveViewer(HabitatSimInteractiveViewer):
         self.navmesh_settings = habitat_sim.NavMeshSettings()
         self.navmesh_settings.set_defaults()
         self.navmesh_settings.agent_radius = 0.30
+        self.navmesh_settings.include_static_objects = True
         self.sim.recompute_navmesh(
             self.sim.pathfinder,
             self.navmesh_settings,
-            include_static_objects=True,
         )
 
         # Set all articulated objects back to original motion_type

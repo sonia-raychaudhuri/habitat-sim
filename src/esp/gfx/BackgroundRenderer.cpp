@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -11,7 +11,6 @@
 #include <thread>
 
 #include "esp/core/Check.h"
-#include "esp/gfx/magnum.h"
 #include "esp/sensor/VisualSensor.h"
 
 namespace Mn = Magnum;
@@ -112,15 +111,14 @@ void BackgroundRenderer::releaseContext() {
 int BackgroundRenderer::threadRender() {
   if (!threadOwnsContext_) {
     ESP_VERY_VERBOSE() << "Background thread acquired GL Context";
-    context_->makeCurrentPlatform();
-    Mn::GL::Context::makeCurrent(threadContext_.get());
+    context_->makeCurrent();
     threadOwnsContext_ = true;
   }
 
   std::vector<std::vector<RenderCamera::DrawableTransforms>> jobTransforms(
       jobs_.size());
 
-  for (int i = 0; i < jobs_.size(); ++i) {
+  for (size_t i = 0; i < jobs_.size(); ++i) {
     auto& job = jobs_[i];
     sensor::VisualSensor& sensor = std::get<0>(job);
     scene::SceneGraph& sg = std::get<1>(job);
@@ -140,7 +138,7 @@ int BackgroundRenderer::threadRender() {
   sgLock_.store(0, std::memory_order_release);
   cpp20::atomic_notify_all(&sgLock_);
 
-  for (int i = 0; i < jobs_.size(); ++i) {
+  for (size_t i = 0; i < jobs_.size(); ++i) {
     auto& job = jobs_[i];
     sensor::VisualSensor& sensor = std::get<0>(job);
     RenderCamera::Flags flags = std::get<3>(job);
@@ -182,23 +180,15 @@ int BackgroundRenderer::threadRender() {
 
 void BackgroundRenderer::threadReleaseContext() {
   if (threadOwnsContext_) {
-    Mn::GL::Context::makeCurrent(nullptr);
-    context_->releasePlatform();
+    context_->release();
     threadOwnsContext_ = false;
   }
 }
 
 void BackgroundRenderer::runLoopThread() {
-  context_->makeCurrentPlatform();
-  threadContext_ =
-      Cr::Containers::pointer<Mn::Platform::GLContext>(Mn::NoCreate);
-  if (!threadContext_->tryCreate())
-    Mn::Fatal{} << "BackgroundRenderer: Failed to create OpenGL context";
+  context_->makeCurrent();
 
-  Mn::GL::Context::makeCurrent(threadContext_.get());
   threadOwnsContext_ = true;
-
-  Renderer::setupMagnumFeatures();
 
   threadReleaseContext();
   done_.store(1, std::memory_order_release);
@@ -215,7 +205,6 @@ void BackgroundRenderer::runLoopThread() {
     switch (task_) {
       case Task::Exit:
         threadReleaseContext();
-        threadContext_ = nullptr;
         done = true;
         break;
       case Task::ReleaseContext:

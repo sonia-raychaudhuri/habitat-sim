@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -23,8 +23,9 @@ PhysicsManagerAttributes::ptr PhysicsAttributesManager::createObject(
       physicsFilename, msg, registerTemplate);
 
   if (nullptr != attrs) {
-    ESP_DEBUG() << msg << "physics manager attributes created"
-                << (registerTemplate ? "and registered." : ".");
+    ESP_DEBUG(Mn::Debug::Flag::NoSpace)
+        << msg << " physics manager attributes created"
+        << (registerTemplate ? " and registered." : ".");
   }
   return attrs;
 }  // PhysicsAttributesManager::createObject

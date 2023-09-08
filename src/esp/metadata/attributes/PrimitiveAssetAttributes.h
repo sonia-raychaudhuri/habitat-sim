@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -185,7 +185,7 @@ class AbstractPrimitiveAttributes : public AbstractAttributes {
     std::size_t keyLoc = configStr.find(key);
     if (keyLoc == std::string::npos) {
       ESP_WARNING() << "Key" << key << "not found in configStr" << configStr
-                    << ". Aborting.";
+                    << ", so retrieving empty string.";
       return "";
     }
     std::size_t keyLen = key.length(), keyEnd = keyLoc + keyLen;

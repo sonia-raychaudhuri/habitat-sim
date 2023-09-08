@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -107,7 +107,7 @@ class ManagedContainer : public ManagedContainerBase {
     if (nullptr == object) {
       return nullptr;
     }
-    return this->postCreateRegister(object, registerObject);
+    return this->postCreateRegister(std::move(object), registerObject);
   }  // ManagedContainer::createDefault
 
   /**
@@ -131,22 +131,22 @@ class ManagedContainer : public ManagedContainerBase {
       ESP_ERROR(Magnum::Debug::Flag::NoSpace)
           << "<" << this->objectType_
           << "> : Invalid (null) managed object passed to "
-             "registration. Aborting.";
+             "registration, so registration aborted.";
       return ID_UNDEFINED;
     }
     if ("" != objectHandle) {
-      return registerObjectFinalize(managedObject, objectHandle,
+      return registerObjectFinalize(std::move(managedObject), objectHandle,
                                     forceRegistration);
     }
     std::string handleToSet = managedObject->getHandle();
     if ("" == handleToSet) {
       ESP_ERROR(Magnum::Debug::Flag::NoSpace)
           << "<" << this->objectType_
-          << "> : No valid handle specified to register this "
-          << this->objectType_ << " managed object. Aborting.";
+          << "> : No valid handle specified to register this managed object, "
+             "so registration aborted.";
       return ID_UNDEFINED;
     }
-    return registerObjectFinalize(managedObject, handleToSet,
+    return registerObjectFinalize(std::move(managedObject), handleToSet,
                                   forceRegistration);
   }  // ManagedContainer::registerObject
 

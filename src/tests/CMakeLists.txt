@@ -1,5 +1,16 @@
-find_package(Magnum REQUIRED DebugTools AnyImageConverter)
-find_package(MagnumPlugins REQUIRED StbImageImporter)
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+find_package(Magnum REQUIRED DebugTools AnyImageConverter AnySceneImporter)
+find_package(
+  MagnumPlugins REQUIRED GltfImporter StbImageImporter KtxImporter
+  OPTIONAL_COMPONENTS GltfSceneConverter KtxImageConverter
+)
+
+if(BUILD_WITH_BACKGROUND_RENDERER)
+  find_package(MagnumPlugins REQUIRED OpenExrImporter OpenExrImageConverter)
+endif()
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/configure.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/configure.h
@@ -25,6 +36,31 @@ corrade_add_test(
 )
 target_include_directories(AttributesManagersTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
+corrade_add_test(
+  GfxBatchRendererTest
+  GfxBatchRendererTest.cpp
+  LIBRARIES
+  gfx_batch
+  Magnum::DebugTools
+  Magnum::AnyImageConverter
+  Magnum::AnySceneImporter
+  MagnumPlugins::GltfImporter
+  MagnumPlugins::KtxImporter
+  MagnumPlugins::StbImageImporter
+)
+target_include_directories(GfxBatchRendererTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+if(BUILD_WITH_CUDA)
+  target_include_directories(
+    GfxBatchRendererTest PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+  )
+endif()
+if(MagnumPlugins_GltfSceneConverter_FOUND)
+  target_link_libraries(GfxBatchRendererTest PRIVATE MagnumPlugins::GltfSceneConverter)
+endif()
+if(MagnumPlugins_KtxImageConverter_FOUND)
+  target_link_libraries(GfxBatchRendererTest PRIVATE MagnumPlugins::KtxImageConverter)
+endif()
+
 corrade_add_test(CoreTest CoreTest.cpp LIBRARIES core io)
 
 corrade_add_test(CullingTest CullingTest.cpp LIBRARIES gfx)
@@ -34,7 +70,7 @@ corrade_add_test(
   DepthUnprojectionTest
   DepthUnprojectionTest.cpp
   LIBRARIES
-  gfx
+  gfx_batch
   Magnum::MeshTools
   Magnum::OpenGLTester
   Magnum::Trade
@@ -55,6 +91,24 @@ corrade_add_test(
   sim
 )
 target_include_directories(GfxReplayTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
+if(BUILD_WITH_BACKGROUND_RENDERER)
+  corrade_add_test(
+    BatchReplayRendererTest
+    BatchReplayRendererTest.cpp
+    LIBRARIES
+    assets
+    gfx
+    gfx_batch
+    physics
+    sim
+    MagnumPlugins::OpenExrImageConverter
+    MagnumPlugins::OpenExrImporter
+  )
+  target_include_directories(
+    BatchReplayRendererTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
+  )
+endif()
 
 corrade_add_test(GibsonSceneTest GibsonSceneTest.cpp LIBRARIES scene sim)
 target_include_directories(GibsonSceneTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
@@ -82,11 +136,19 @@ corrade_add_test(
   LIBRARIES
   core
   nav
+  io
   assets
 )
 target_include_directories(NavTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
-corrade_add_test(PathFinderTest PathFinderTest.cpp LIBRARIES nav Corrade::Utility)
+corrade_add_test(
+  PathFinderTest
+  PathFinderTest.cpp
+  LIBRARIES
+  nav
+  io
+  Corrade::Utility
+)
 target_include_directories(PathFinderTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 corrade_add_test(PhysicsTest PhysicsTest.cpp LIBRARIES physics)
@@ -99,6 +161,7 @@ corrade_add_test(
   scene
   assets
   sim
+  physics
 )
 target_include_directories(ReplicaSceneTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -119,21 +182,6 @@ corrade_add_test(
   MagnumPlugins::StbImageImporter
 )
 target_include_directories(SimTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-
-if(BUILD_WITH_VHACD)
-  corrade_add_test(
-    VoxelGridTest
-    VoxelGridTest.cpp
-    LIBRARIES
-    sim
-    assets
-    geo
-    Magnum::DebugTools
-    Magnum::AnyImageConverter
-    MagnumPlugins::StbImageImporter
-  )
-  target_include_directories(VoxelGridTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-endif()
 
 # Some tests are LOUD, we don't want to include their full log (but OTOH we
 # want to have full log from others, so this is a compromise)

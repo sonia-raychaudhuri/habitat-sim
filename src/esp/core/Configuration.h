@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -35,7 +35,9 @@ enum class ConfigStoredType {
   Boolean,
   Integer,
   Double,
+  MagnumVec2,
   MagnumVec3,
+  MagnumVec4,
   MagnumMat3,
   MagnumQuat,
   MagnumRad,
@@ -89,8 +91,24 @@ constexpr ConfigStoredType configStoredTypeFor<std::string>() {
   return ConfigStoredType::String;
 }
 template <>
+constexpr ConfigStoredType configStoredTypeFor<Mn::Vector2>() {
+  return ConfigStoredType::MagnumVec2;
+}
+template <>
 constexpr ConfigStoredType configStoredTypeFor<Mn::Vector3>() {
   return ConfigStoredType::MagnumVec3;
+}
+template <>
+constexpr ConfigStoredType configStoredTypeFor<Mn::Color3>() {
+  return ConfigStoredType::MagnumVec3;
+}
+template <>
+constexpr ConfigStoredType configStoredTypeFor<Mn::Vector4>() {
+  return ConfigStoredType::MagnumVec4;
+}
+template <>
+constexpr ConfigStoredType configStoredTypeFor<Mn::Color4>() {
+  return ConfigStoredType::MagnumVec4;
 }
 template <>
 constexpr ConfigStoredType configStoredTypeFor<Mn::Matrix3>() {
@@ -705,6 +723,14 @@ class Configuration {
     writeValueToJson(key, key, jsonObj, allocator);
   }
 
+  /**
+   * @brief Return all the values in this cfg in a formatted string. Subconfigs
+   * will be displaced by a tab.
+   * @param newLineStr The string to put at the end of each newline. As
+   * subconfigs are called, add a tab to this.
+   */
+  std::string getAllValsAsString(const std::string& newLineStr = "\n") const;
+
  protected:
   /**
    * @brief Friend function.  Checks if passed @p key is contained in @p
@@ -748,7 +774,7 @@ class Configuration {
    */
   std::shared_ptr<Configuration> addSubgroup(const std::string& name) {
     // Attempt to insert an empty pointer
-    auto result = configMap_.insert({name, std::shared_ptr<Configuration>{}});
+    auto result = configMap_.emplace(name, std::shared_ptr<Configuration>{});
     // If name not already present (insert succeeded) then add new
     // configuration
     if (result.second) {
@@ -765,6 +791,9 @@ class Configuration {
 
   ESP_SMART_POINTERS(Configuration)
 };  // class Configuration
+
+MAGNUM_EXPORT Mn::Debug& operator<<(Mn::Debug& debug,
+                                    const Configuration& value);
 
 /**
  * @brief Retrieves a shared pointer to a copy of the subConfig @ref

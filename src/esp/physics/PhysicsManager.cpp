@@ -1,10 +1,16 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
 #include "PhysicsManager.h"
 #include <Magnum/Math/Range.h>
+
+#include <utility>
 #include "esp/assets/CollisionMeshData.h"
+#include "esp/assets/ResourceManager.h"
+#include "esp/metadata/managers/AOAttributesManager.h"
+#include "esp/metadata/managers/ObjectAttributesManager.h"
+#include "esp/metadata/managers/PhysicsAttributesManager.h"
 #include "esp/physics/objectManagers/ArticulatedObjectManager.h"
 #include "esp/physics/objectManagers/RigidObjectManager.h"
 #include "esp/sim/Simulator.h"
@@ -53,15 +59,7 @@ PhysicsManager::~PhysicsManager() {
 bool PhysicsManager::addStage(
     const metadata::attributes::StageAttributes::ptr& initAttributes,
     const metadata::attributes::SceneObjectInstanceAttributes::cptr&
-        stageInstanceAttributes,
-    const std::vector<assets::CollisionMeshData>& meshGroup) {
-  // Test Mesh primitive is valid
-  for (const assets::CollisionMeshData& meshData : meshGroup) {
-    if (!isMeshPrimitiveValid(meshData)) {
-      return false;
-    }
-  }
-
+        stageInstanceAttributes) {
   //! Initialize stage
   bool sceneSuccess = addStageFinalize(initAttributes);
   if (sceneSuccess) {
@@ -84,6 +82,36 @@ bool PhysicsManager::addStageFinalize(
   return stageSuccess;
 }  // PhysicsManager::addStageFinalize
 
+int PhysicsManager::addObject(const std::string& attributesHandle,
+                              scene::SceneNode* attachmentNode,
+                              const std::string& lightSetup) {
+  esp::metadata::attributes::ObjectAttributes::ptr attributes =
+      resourceManager_.getObjectAttributesManager()->getObjectCopyByHandle(
+          attributesHandle);
+  if (!attributes) {
+    ESP_ERROR() << "Object creation failed due to unknown attributes"
+                << attributesHandle;
+    return ID_UNDEFINED;
+  }
+  // attributes exist, get drawables if valid simulator accessible
+  return addObjectQueryDrawables(attributes, attachmentNode, lightSetup);
+}  // PhysicsManager::addObject
+
+int PhysicsManager::addObject(int attributesID,
+                              scene::SceneNode* attachmentNode,
+                              const std::string& lightSetup) {
+  const esp::metadata::attributes::ObjectAttributes::ptr attributes =
+      resourceManager_.getObjectAttributesManager()->getObjectCopyByID(
+          attributesID);
+  if (!attributes) {
+    ESP_ERROR() << "Object creation failed due to unknown attributes ID"
+                << attributesID;
+    return ID_UNDEFINED;
+  }
+  // attributes exist, get drawables if valid simulator accessible
+  return addObjectQueryDrawables(attributes, attachmentNode, lightSetup);
+}  // PhysicsManager::addObject
+
 int PhysicsManager::addObjectInstance(
     const esp::metadata::attributes::SceneObjectInstanceAttributes::cptr&
         objInstAttributes,
@@ -95,6 +123,16 @@ int PhysicsManager::addObjectInstance(
   auto objAttributes =
       resourceManager_.getObjectAttributesManager()->getObjectCopyByHandle(
           attributesHandle);
+
+  if (!objAttributes) {
+    ESP_ERROR(Mn::Debug::Flag::NoSpace)
+        << "Missing/improperly configured ObjectAttributes '"
+        << attributesHandle << "', whose handle contains '"
+        << objInstAttributes->getHandle()
+        << "' as specified in object instance attributes, so addObjectInstance "
+           "aborted.";
+    return ID_UNDEFINED;
+  }
   // check if an object is being set to be not visible for a particular
   // instance.
   int visSet = objInstAttributes->getIsInstanceVisible();
@@ -103,13 +141,6 @@ int PhysicsManager::addObjectInstance(
     objAttributes->setIsVisible(visSet == 1);
   }
 
-  if (!objAttributes) {
-    ESP_ERROR() << "Missing/improperly configured objectAttributes"
-                << attributesHandle << ", whose handle contains"
-                << objInstAttributes->getHandle()
-                << "as specified in object instance attributes.";
-    return 0;
-  }
   // set shader type to use for object instance, which may override shadertype
   // specified in object attributes.
   const auto objShaderType = objInstAttributes->getShaderType();
@@ -118,14 +149,17 @@ int PhysicsManager::addObjectInstance(
     objAttributes->setShaderType(getShaderTypeName(objShaderType));
   }
 
-  // set scaling values for this instance of stage attributes - first uniform
+  // set scaling values for this instance of object attributes - first uniform
   // scaling
   objAttributes->setScale(objAttributes->getScale() *
                           objInstAttributes->getUniformScale());
-  // set scaling values for this instance of stage attributes - next non-uniform
-  // scaling
+  // set scaling values for this instance of object attributes - next
+  // non-uniform scaling
   objAttributes->setScale(objAttributes->getScale() *
                           objInstAttributes->getNonUniformScale());
+  // set scaled mass
+  objAttributes->setMass(objAttributes->getMass() *
+                         objInstAttributes->getMassScale());
 
   // adding object using provided object attributes
   int objID =
@@ -133,10 +167,11 @@ int PhysicsManager::addObjectInstance(
 
   if (objID == ID_UNDEFINED) {
     // instancing failed for some reason.
-    ESP_ERROR() << "Object create failed for objectAttributes"
-                << attributesHandle << ", whose handle contains"
-                << objInstAttributes->getHandle()
-                << "as specified in object instance attributes.";
+    ESP_ERROR(Mn::Debug::Flag::NoSpace)
+        << "Object create failed for ObjectAttributes '" << attributesHandle
+        << "', whose handle contains '" << objInstAttributes->getHandle()
+        << "' as specified in object instance attributes, so addObjectInstance "
+           "aborted.";
     return ID_UNDEFINED;
   }
   auto objPtr = this->existingObjects_.at(objID);
@@ -189,7 +224,7 @@ int PhysicsManager::addObject(
   if (!objectAttributes) {
     // should never run, but just in case
     ESP_ERROR() << "Object creation failed due to nonexistant "
-                   "objectAttributes";
+                   "objectAttributes, so addObject aborted.";
     return ID_UNDEFINED;
   }
   // verify whether necessary assets exist, and if not, instantiate them
@@ -198,7 +233,8 @@ int PhysicsManager::addObject(
       resourceManager_.instantiateAssetsOnDemand(objectAttributes);
   if (!objectSuccess) {
     ESP_ERROR() << "ResourceManager::instantiateAssetsOnDemand "
-                   "unsuccessful. Aborting.";
+                   "unsuccessful, so addObject `"
+                << objectAttributes->getHandle() << "` aborted.";
     return ID_UNDEFINED;
   }
 
@@ -217,8 +253,9 @@ int PhysicsManager::addObject(
     if (attachmentNode == nullptr) {
       delete objectNode;
     }
-    ESP_ERROR() << "PhysicsManager::makeRigidObject unsuccessful. "
-                   " Aborting.";
+    ESP_ERROR(Mn::Debug::Flag::NoSpace)
+        << "PhysicsManager::makeAndAddRigidObject unsuccessful, so addObject `"
+        << objectAttributes->getHandle() << "` aborted.";
     return ID_UNDEFINED;
   }
 
@@ -242,7 +279,8 @@ int PhysicsManager::addObject(
   if (!objectSuccess) {
     // if failed for some reason, remove and return
     removeObject(nextObjectID_, true, true);
-    ESP_ERROR() << "PhysicsManager::finalizeObject unsuccessful.  Aborting.";
+    ESP_ERROR() << "PhysicsManager::finalizeObject unsuccessful, so addObject `"
+                << objectAttributes->getHandle() << "` aborted.";
     return ID_UNDEFINED;
   }
   // Valid object exists by here.
@@ -252,8 +290,8 @@ int PhysicsManager::addObject(
   std::string simpleObjectHandle = objectAttributes->getSimplifiedHandle();
   std::string newObjectHandle =
       rigidObjectManager_->getUniqueHandleFromCandidate(simpleObjectHandle);
-  ESP_WARNING() << "Simplified template handle :" << simpleObjectHandle
-                << " | newObjectHandle :" << newObjectHandle;
+  ESP_DEBUG() << "Simplified template handle :" << simpleObjectHandle
+              << " | newObjectHandle :" << newObjectHandle;
 
   existingObjects_.at(nextObjectID_)->setObjectName(newObjectHandle);
 
@@ -264,25 +302,65 @@ int PhysicsManager::addObject(
   objWrapper->setObjectRef(existingObjects_.at(nextObjectID_));
 
   // 4.0 register wrapper in manager
-  rigidObjectManager_->registerObject(objWrapper, newObjectHandle);
+  rigidObjectManager_->registerObject(std::move(objWrapper), newObjectHandle);
 
   return nextObjectID_;
 }  // PhysicsManager::addObject
 
+int PhysicsManager::addArticulatedObject(const std::string& attributesHandle,
+                                         bool forceReload,
+                                         const std::string& lightSetup) {
+  esp::metadata::attributes::ArticulatedObjectAttributes::ptr attributes =
+      resourceManager_.getAOAttributesManager()->getObjectCopyByHandle(
+          attributesHandle);
+  if (!attributes) {
+    ESP_ERROR(Mn::Debug::Flag::NoSpace)
+        << "Articulated Object creation failed due to unknown attributes '"
+        << attributesHandle << "'";
+    return ID_UNDEFINED;
+  }
+  // attributes exist, get drawables if valid simulator accessible
+  return addArticulatedObjectQueryDrawables(attributes, forceReload,
+                                            lightSetup);
+}  // PhysicsManager::addArticulatedObject
+
+int PhysicsManager::addArticulatedObject(int attributesID,
+                                         bool forceReload,
+                                         const std::string& lightSetup) {
+  const esp::metadata::attributes::ArticulatedObjectAttributes::ptr attributes =
+      resourceManager_.getAOAttributesManager()->getObjectCopyByID(
+          attributesID);
+  if (!attributes) {
+    ESP_ERROR()
+        << "Articulated Object creation failed due to unknown attributes ID"
+        << attributesID;
+    return ID_UNDEFINED;
+  }
+  // attributes exist, get drawables if valid simulator accessible
+  return addArticulatedObjectQueryDrawables(attributes, forceReload,
+                                            lightSetup);
+}  // PhysicsManager::addObject
+
 int PhysicsManager::addArticulatedObjectInstance(
-    const std::string& filepath,
     const std::shared_ptr<
         const esp::metadata::attributes::SceneAOInstanceAttributes>&
         aObjInstAttributes,
+    const std::string& artObjAttrHandle,
     const std::string& lightSetup) {
-  if (simulator_ == nullptr) {
+  // Get ArticulatedObjectAttributes
+  auto artObjAttributes =
+      resourceManager_.getAOAttributesManager()->getObjectCopyByHandle(
+          artObjAttrHandle);
+
+  if (!artObjAttributes) {
+    ESP_ERROR(Mn::Debug::Flag::NoSpace)
+        << "Missing/improperly configured ArticulatedObjectAttributes '"
+        << artObjAttrHandle << "', whose handle contains '"
+        << aObjInstAttributes->getHandle()
+        << "' as specified in articulated object instance attributes, so "
+           "addArticulatedObjectInstance aborted.";
     return ID_UNDEFINED;
   }
-
-  // aquire context if available
-  simulator_->getRenderGLContext();
-  // Get drawables from simulator. TODO: Support non-existent simulator?
-  auto& drawables = simulator_->getDrawableGroup();
 
   // check if an object is being set to be not visible for a particular
   // instance.
@@ -292,19 +370,53 @@ int PhysicsManager::addArticulatedObjectInstance(
     // objAttributes->setIsVisible(visSet == 1);
     // TODO: manage articulated object visibility.
   }
+  // set uniform scale
+  artObjAttributes->setUniformScale(artObjAttributes->getUniformScale() *
+                                    aObjInstAttributes->getUniformScale());
+  // set scaled mass
+  artObjAttributes->setMassScale(artObjAttributes->getMassScale() *
+                                 aObjInstAttributes->getMassScale());
 
-  // call object creation (resides only in physics library-based derived physics
-  // managers)
-  int aObjID = this->addArticulatedObjectFromURDF(
-      filepath, &drawables, aObjInstAttributes->getFixedBase(),
-      aObjInstAttributes->getUniformScale(), aObjInstAttributes->getMassScale(),
-      false, false, lightSetup);
+  // set shader type to use for articulated object instance, which may override
+  // shadertype specified in articulated object attributes.
+  const auto artObjShaderType = aObjInstAttributes->getShaderType();
+  if (artObjShaderType !=
+      metadata::attributes::ObjectInstanceShaderType::Unspecified) {
+    artObjAttributes->setShaderType(getShaderTypeName(artObjShaderType));
+  }
+
+  const auto baseType = aObjInstAttributes->getBaseType();
+  if (baseType !=
+      metadata::attributes::ArticulatedObjectBaseType::Unspecified) {
+    artObjAttributes->setBaseType(
+        metadata::attributes::getAOBaseTypeName(baseType));
+  }
+
+  const auto inertiaSrc = aObjInstAttributes->getInertiaSource();
+  if (inertiaSrc !=
+      metadata::attributes::ArticulatedObjectInertiaSource::Unspecified) {
+    artObjAttributes->setInertiaSource(
+        metadata::attributes::getAOInertiaSourceName(inertiaSrc));
+  }
+
+  const auto linkOrder = aObjInstAttributes->getLinkOrder();
+  if (linkOrder !=
+      metadata::attributes::ArticulatedObjectLinkOrder::Unspecified) {
+    artObjAttributes->setLinkOrder(
+        metadata::attributes::getAOLinkOrderName(linkOrder));
+  }
+
+  int aObjID =
+      addArticulatedObjectQueryDrawables(artObjAttributes, false, lightSetup);
+
   if (aObjID == ID_UNDEFINED) {
     // instancing failed for some reason.
-    ESP_ERROR() << "Articulated Object create failed for model filepath"
-                << filepath << ", whose handle is"
-                << aObjInstAttributes->getHandle()
-                << "as specified in articulated object instance attributes.";
+    ESP_ERROR(Mn::Debug::Flag::NoSpace)
+        << "Articulated Object create failed for ArticulatedObjectAttributes '"
+        << artObjAttrHandle << "', whose handle contains '"
+        << aObjInstAttributes->getHandle()
+        << "' as specified in articulated object instance attributes, so "
+           "addArticulatedObjectInstance aborted.";
     return ID_UNDEFINED;
   }
 
@@ -325,18 +437,104 @@ int PhysicsManager::addArticulatedObjectInstance(
   return aObjID;
 }  // PhysicsManager::addArticulatedObjectInstance
 
+int PhysicsManager::addArticulatedObjectQueryDrawables(
+    const esp::metadata::attributes::ArticulatedObjectAttributes::ptr&
+        artObjAttributes,
+    bool forceReload,
+    const std::string& lightSetup) {
+  // attributes exist, get drawables if valid simulator accessible
+  if (simulator_ != nullptr) {
+    // aquire context if available
+    simulator_->getRenderGLContext();
+    auto& drawables = simulator_->getDrawableGroup();
+    return addArticulatedObject(artObjAttributes, &drawables, forceReload,
+                                lightSetup);
+  }
+  // TODO Support non-existent simulator?
+  return ID_UNDEFINED;
+}  // PhysicsManager::addObject
+
+int PhysicsManager::addArticulatedObjectFromURDF(
+    const std::string& filepath,
+    bool fixedBase,
+    float globalScale,
+    float massScale,
+    bool forceReload,
+    bool maintainLinkOrder,
+    bool intertiaFromURDF,
+    const std::string& lightSetup) {
+  if (simulator_ != nullptr) {
+    // aquire context if available
+    simulator_->getRenderGLContext();
+    auto& drawables = simulator_->getDrawableGroup();
+    return addArticulatedObjectFromURDF(
+        filepath, &drawables, fixedBase, globalScale, massScale, forceReload,
+        maintainLinkOrder, intertiaFromURDF, lightSetup);
+  }
+  return ID_UNDEFINED;
+}  // PhysicsManager::addArticulatedObjectFromURDF
+
+int PhysicsManager::addArticulatedObjectFromURDF(
+    const std::string& filepath,
+    DrawableGroup* drawables,
+    bool fixedBase,
+    float globalScale,
+    float massScale,
+    bool forceReload,
+    bool maintainLinkOrder,
+    bool intertiaFromURDF,
+    const std::string& lightSetup) {
+  // Retrieve or create the appropriate ArticulatedObjectAttributes to create
+  // this AO.
+
+  bool attribsFound =
+      resourceManager_.getAOAttributesManager()->getObjectLibHasHandle(
+          filepath);
+
+  esp::metadata::attributes::ArticulatedObjectAttributes::ptr artObjAttributes =
+      attribsFound
+          ? resourceManager_.getAOAttributesManager()->getObjectCopyByHandle(
+                filepath)
+          : resourceManager_.getAOAttributesManager()->createObject(filepath,
+                                                                    true);
+
+  // Set pertinent values
+  artObjAttributes->setUniformScale(globalScale);
+  artObjAttributes->setMassScale(static_cast<double>(massScale));
+
+  artObjAttributes->setBaseType(metadata::attributes::getAOBaseTypeName(
+      fixedBase ? metadata::attributes::ArticulatedObjectBaseType::Fixed
+                : metadata::attributes::ArticulatedObjectBaseType::Free));
+
+  artObjAttributes->setInertiaSource(
+      metadata::attributes::getAOInertiaSourceName(
+          intertiaFromURDF
+              ? metadata::attributes::ArticulatedObjectInertiaSource::URDF
+              : metadata::attributes::ArticulatedObjectInertiaSource::
+                    Computed));
+
+  artObjAttributes->setLinkOrder(metadata::attributes::getAOLinkOrderName(
+      maintainLinkOrder
+          ? metadata::attributes::ArticulatedObjectLinkOrder::URDFOrder
+          : metadata::attributes::ArticulatedObjectLinkOrder::TreeTraversal));
+
+  return addArticulatedObject(artObjAttributes, drawables, forceReload,
+                              lightSetup);
+
+}  // PhysicsManager::addArticulatedObjectFromURDF
+
 void PhysicsManager::buildCurrentStateSceneAttributes(
     const metadata::attributes::SceneInstanceAttributes::ptr&
         sceneInstanceAttrs) const {
   // 1. set stage instance
-  sceneInstanceAttrs->setStageInstance(
+  sceneInstanceAttrs->setStageInstanceAttrs(
       staticStageObject_->getCurrentStateInstanceAttr());
   // 2. Clear existing object instances, and set new ones reflecting current
   // state
   sceneInstanceAttrs->clearObjectInstances();
   // get each object's current state as a SceneObjectInstanceAttributes
   for (const auto& item : existingObjects_) {
-    sceneInstanceAttrs->addObjectInstance(
+    sceneInstanceAttrs->addObjectInstanceAttrs(
         item.second->getCurrentStateInstanceAttr());
   }
   // 3. Clear existing Articulated object instances, and set new ones reflecting
@@ -344,7 +542,7 @@ void PhysicsManager::buildCurrentStateSceneAttributes(
   sceneInstanceAttrs->clearArticulatedObjectInstances();
   // get each articulated object's current state as a SceneAOInstanceAttributes
   for (const auto& item : existingArticulatedObjects_) {
-    sceneInstanceAttrs->addArticulatedObjectInstance(
+    sceneInstanceAttrs->addArticulatedObjectInstanceAttrs(
         item.second->getCurrentStateInstanceAttr());
   }
 
@@ -375,7 +573,7 @@ int PhysicsManager::addTrajectoryObject(const std::string& trajVisName,
       trajVisName, uniquePts, colorVec, numSegments, radius, smooth, numInterp);
   if (!success) {
     ESP_ERROR() << "Failed to create Trajectory visualization mesh for"
-                << trajVisName;
+                << trajVisName << "so addTrajectoryObject aborted.";
     return ID_UNDEFINED;
   }
   // 2. create object attributes for the trajectory
@@ -391,7 +589,7 @@ int PhysicsManager::addTrajectoryObject(const std::string& trajVisName,
   if (trajVisID == ID_UNDEFINED) {
     // failed to add object - need to delete asset from resourceManager.
     ESP_ERROR() << "Failed to create Trajectory visualization object for"
-                << trajVisName;
+                << trajVisName << "so addTrajectoryObject aborted.";
     // TODO : support removing asset by removing from resourceDict_ properly
     // using trajVisName
     return ID_UNDEFINED;
@@ -501,11 +699,6 @@ bool PhysicsManager::makeAndAddRigidObject(
   return objSuccess;
 }
 
-//! Base physics manager has no requirement for mesh primitive
-bool PhysicsManager::isMeshPrimitiveValid(const assets::CollisionMeshData&) {
-  return true;
-}
-
 // TODO: this function should do any engine specific setting which is
 // necessary to change the timestep
 void PhysicsManager::setTimestep(double dt) {
@@ -589,29 +782,6 @@ int PhysicsManager::checkActiveObjects() {
   return numActive;
 }
 
-#ifdef ESP_BUILD_WITH_VHACD
-void PhysicsManager::generateVoxelization(const int physObjectID,
-                                          const int resolution) {
-  auto objIter = getRigidObjIteratorOrAssert(physObjectID);
-  objIter->second->generateVoxelization(resourceManager_, resolution);
-}
-
-void PhysicsManager::generateStageVoxelization(const int resolution) {
-  staticStageObject_->generateVoxelization(resourceManager_, resolution);
-}
-#endif
-
-std::shared_ptr<esp::geo::VoxelWrapper> PhysicsManager::getObjectVoxelization(
-    const int physObjectID) const {
-  auto objIter = getConstRigidObjIteratorOrAssert(physObjectID);
-  return objIter->second->getVoxelization();
-}
-
-std::shared_ptr<esp::geo::VoxelWrapper> PhysicsManager::getStageVoxelization()
-    const {
-  return staticStageObject_->getVoxelization();
-}
-
 void PhysicsManager::setObjectBBDraw(int physObjectID,
                                      DrawableGroup* drawables,
                                      bool drawBB) {
@@ -635,57 +805,11 @@ void PhysicsManager::setObjectBBDraw(int physObjectID,
   }
 }
 
-void PhysicsManager::setObjectVoxelizationDraw(int physObjectID,
-                                               const std::string& gridName,
-                                               DrawableGroup* drawables,
-                                               bool drawVoxelization) {
-  auto objIter = getRigidObjIteratorOrAssert(physObjectID);
-  setVoxelizationDraw(
-      gridName, static_cast<esp::physics::RigidBase*>(objIter->second.get()),
-      drawables, drawVoxelization);
+metadata::attributes::PhysicsManagerAttributes::ptr
+PhysicsManager::getInitializationAttributes() const {
+  return metadata::attributes::PhysicsManagerAttributes::create(
+      *physicsManagerAttributes_);
 }
 
-void PhysicsManager::setStageVoxelizationDraw(const std::string& gridName,
-                                              DrawableGroup* drawables,
-                                              bool drawVoxelization) {
-  setVoxelizationDraw(
-      gridName, static_cast<esp::physics::RigidBase*>(staticStageObject_.get()),
-      drawables, drawVoxelization);
-}
-
-void PhysicsManager::setVoxelizationDraw(const std::string& gridName,
-                                         esp::physics::RigidBase* rigidBase,
-                                         DrawableGroup* drawables,
-                                         bool drawVoxelization) {
-  if (rigidBase->VoxelNode_ && !drawVoxelization) {
-    // destroy the node
-    delete rigidBase->VoxelNode_;
-    rigidBase->VoxelNode_ = nullptr;
-
-  } else if (drawVoxelization && rigidBase->visualNode_) {
-    // if the VoxelNode is already rendering something, destroy it.
-    delete rigidBase->VoxelNode_;
-
-    // re-create the voxel node
-    rigidBase->VoxelNode_ = &rigidBase->visualNode_->createChild();
-
-    esp::geo::VoxelWrapper* voxelWrapper_ = rigidBase->voxelWrapper.get();
-    gfx::Drawable::Flags meshAttributeFlags{};
-    resourceManager_.createDrawable(
-        &voxelWrapper_->getVoxelGrid()->getMeshGL(gridName), meshAttributeFlags,
-        *rigidBase->VoxelNode_, DEFAULT_LIGHTING_KEY,
-        PER_VERTEX_OBJECT_ID_MATERIAL_KEY, drawables);
-
-    // If the RigidBase is a stage, need to set the BB to make culling work.
-    if (dynamic_cast<esp::physics::RigidStage*>(rigidBase) != nullptr) {
-      // set bounding box for the node to be the bb computed by vhacd
-      Mn::Range3D bb{rigidBase->voxelWrapper->getVoxelGrid()->getOffset(),
-                     rigidBase->voxelWrapper->getVoxelGrid()->getMaxOffset()};
-      rigidBase->VoxelNode_->setMeshBB(bb);
-      //
-      rigidBase->node().computeCumulativeBB();
-    }
-  }
-}
 }  // namespace physics
 }  // namespace esp

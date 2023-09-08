@@ -1,3 +1,7 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 from typing import Any, Dict, List, Optional, Tuple
 
 import attr
@@ -159,8 +163,7 @@ class GreedyGeodesicFollower:
 
         if next_act == GreedyFollowerCodes.ERROR:
             raise errors.GreedyFollowerError()
-        else:
-            return self.action_mapping[next_act]
+        return self.action_mapping[next_act]
 
     def find_path(self, goal_pos: np.ndarray) -> List[Any]:
         r"""Finds the sequence actions that greedily follow the geodesic

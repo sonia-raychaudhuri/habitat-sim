@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -81,12 +81,6 @@ Use "HEADLESS=True pip install ." to build in headless mode with pip""",
     )
     parser.add_argument("--no-bullet", dest="with_bullet", action="store_false")
     parser.add_argument(
-        "--vhacd",
-        dest="with_vhacd",
-        action="store_true",
-        help="""Build with VHACD convex hull decomposition and voxelization engine.""",
-    )
-    parser.add_argument(
         "--cmake",
         "--force-cmake",
         dest="force_cmake",
@@ -106,7 +100,7 @@ Use "HEADLESS=True pip install ." to build in headless mode with pip""",
         "--cmake-args",
         type=str,
         default=os.environ.get("CMAKE_ARGS", ""),
-        help="""Additional arguements to be passed to cmake.
+        help="""Additional arguments to be passed to cmake.
 Note that you will need to do `--cmake-args="..."` as `--cmake-args "..."`
 will generally not be parsed correctly
 You may need to use --force-cmake to ensure cmake is rerun with new args.
@@ -142,7 +136,7 @@ Use "CMAKE_ARGS="..." pip install ." to set cmake args with pip""",
         "--cache-args",
         dest="cache_args",
         action="store_true",
-        help="""Caches the arguements sent to setup.py
+        help="""Caches the arguments sent to setup.py
         and reloads them on the next invocation.  This argument is not cached""",
     )
 
@@ -322,20 +316,9 @@ class CMakeBuild(build_ext):
             "-DBUILD_GUI_VIEWERS={}".format("ON" if not args.headless else "OFF")
         ]
 
-        if sys.platform not in ["darwin", "win32", "win64"]:
-            cmake_args += [
-                # So Magnum itself prefers EGL over GLX for windowless apps.
-                # Makes sense only on platforms with EGL (Linux, BSD, ...).
-                "-DTARGET_HEADLESS={}".format("ON" if args.headless else "OFF")
-            ]
-        # NOTE: BUILD_TEST is intentional as opposed to BUILD_TESTS which collides
-        # with definition used by some of our dependencies
         cmake_args += ["-DBUILD_TEST={}".format("ON" if args.build_tests else "OFF")]
         cmake_args += [
             "-DBUILD_WITH_BULLET={}".format("ON" if args.with_bullet else "OFF")
-        ]
-        cmake_args += [
-            "-DBUILD_WITH_VHACD={}".format("ON" if args.with_vhacd else "OFF")
         ]
         cmake_args += [
             "-DBUILD_DATATOOL={}".format("ON" if args.build_datatool else "OFF")
@@ -416,7 +399,6 @@ class CMakeBuild(build_ext):
                 # Strip +D
                 k = k[2:]
                 for l in cache_contents:
-
                     match = cache_parser.match(l)
                     if match is None:
                         continue
@@ -458,7 +440,7 @@ class CMakeBuild(build_ext):
 if __name__ == "__main__":
     assert StrictVersion(
         "{}.{}".format(sys.version_info[0], sys.version_info[1])
-    ) >= StrictVersion("3.7"), "Must use python3.7 or newer"
+    ) >= StrictVersion("3.9"), "Must use python 3.9 or newer"
     with open("./requirements.txt", "r") as f:
         requirements = [l.strip() for l in f.readlines() if len(l.strip()) > 0]
 
@@ -475,7 +457,7 @@ if __name__ == "__main__":
         package_dir={"": "src_python"},
         install_requires=requirements,
         tests_require=["hypothesis", "pytest-benchmark", "pytest"],
-        python_requires=">=3.7",
+        python_requires=">=3.9",
         # add extension module
         ext_modules=[CMakeExtension("habitat_sim._ext.habitat_sim_bindings", "src")],
         # add custom build_ext command

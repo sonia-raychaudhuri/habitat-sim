@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -7,16 +7,16 @@
 
 #include <Magnum/GL/AbstractShaderProgram.h>
 #include <Magnum/ResourceManager.h>
+#include <Magnum/Trade/MaterialData.h>
 
 #include "esp/gfx/LightSetup.h"
-#include "esp/gfx/MaterialData.h"
 
 namespace esp {
 namespace gfx {
 
 using ShaderManager = Magnum::ResourceManager<Magnum::GL::AbstractShaderProgram,
                                               gfx::LightSetup,
-                                              gfx::MaterialData>;
+                                              Magnum::Trade::MaterialData>;
 
 /**
  * @brief Set the light setup for a subtree

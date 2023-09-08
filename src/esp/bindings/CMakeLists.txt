@@ -1,4 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 find_package(MagnumBindings REQUIRED Python)
+find_package(MagnumPlugins REQUIRED KtxImporter)
 
 pybind11_add_module(
   habitat_sim_bindings
@@ -23,7 +28,7 @@ pybind11_add_module(
 )
 target_link_libraries(
   habitat_sim_bindings
-  PRIVATE MagnumBindings::Python
+  PRIVATE MagnumBindings::Python MagnumPlugins::KtxImporter
   PUBLIC agent
          assets
          scene

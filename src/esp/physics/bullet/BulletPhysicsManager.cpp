@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -6,13 +6,18 @@
 //#include "BulletCollision/Gimpact/btGImpactShape.h"
 
 #include "BulletPhysicsManager.h"
+
+#include <utility>
 #include "BulletArticulatedObject.h"
 #include "BulletDynamics/Featherstone/btMultiBodyLinkCollider.h"
 #include "BulletRigidObject.h"
 #include "BulletURDFImporter.h"
+#include "esp/assets/RenderAssetInstanceCreationInfo.h"
 #include "esp/assets/ResourceManager.h"
+#include "esp/metadata/attributes/PhysicsManagerAttributes.h"
 #include "esp/physics/objectManagers/ArticulatedObjectManager.h"
 #include "esp/physics/objectManagers/RigidObjectManager.h"
+#include "esp/scene/SceneNode.h"
 #include "esp/sim/Simulator.h"
 
 namespace esp {
@@ -104,36 +109,19 @@ bool BulletPhysicsManager::makeAndAddRigidObject(
   return objSuccess;
 }
 
-int BulletPhysicsManager::addArticulatedObjectFromURDF(
-    const std::string& filepath,
-    bool fixedBase,
-    float globalScale,
-    float massScale,
-    bool forceReload,
-    bool maintainLinkOrder,
-    const std::string& lightSetup) {
-  auto& drawables = simulator_->getDrawableGroup();
-  return addArticulatedObjectFromURDF(filepath, &drawables, fixedBase,
-                                      globalScale, massScale, forceReload,
-                                      maintainLinkOrder, lightSetup);
-}
-
-int BulletPhysicsManager::addArticulatedObjectFromURDF(
-    const std::string& filepath,
+int BulletPhysicsManager::addArticulatedObject(
+    const esp::metadata::attributes::ArticulatedObjectAttributes::ptr&
+        artObjAttributes,
     DrawableGroup* drawables,
-    bool fixedBase,
-    float globalScale,
-    float massScale,
     bool forceReload,
-    bool maintainLinkOrder,
     const std::string& lightSetup) {
   if (simulator_ != nullptr) {
-    // aquire context if available
+    // acquire context if available
     simulator_->getRenderGLContext();
   }
   ESP_CHECK(
-      urdfImporter_->loadURDF(filepath, globalScale, massScale, forceReload),
-      "failed to parse/load URDF file" << filepath);
+      urdfImporter_->loadURDF(artObjAttributes, forceReload),
+      "failed to parse/load URDF file" << artObjAttributes->getURDFPath());
 
   int articulatedObjectID = allocateObjectID();
 
@@ -150,16 +138,44 @@ int BulletPhysicsManager::addArticulatedObjectFromURDF(
   BulletURDFImporter* u2b =
       static_cast<BulletURDFImporter*>(urdfImporter_.get());
 
-  u2b->setFixedBase(fixedBase);
+  u2b->setFixedBase(artObjAttributes->getBaseType() ==
+                    metadata::attributes::ArticulatedObjectBaseType::Fixed);
 
-  // TODO: set these flags up better
   u2b->flags = 0;
-  if (maintainLinkOrder) {
+  if (artObjAttributes->getLinkOrder() ==
+      metadata::attributes::ArticulatedObjectLinkOrder::URDFOrder) {
     u2b->flags |= CUF_MAINTAIN_LINK_ORDER;
+  }
+  if (artObjAttributes->getInertiaSource() ==
+      metadata::attributes::ArticulatedObjectInertiaSource::URDF) {
+    u2b->flags |= CUF_USE_URDF_INERTIA;
   }
   u2b->initURDF2BulletCache();
 
   articulatedObject->initializeFromURDF(*urdfImporter_, {}, physicsNode_);
+  auto model = u2b->getModel();
+
+  // if the URDF model specifies a render asset, load and link it
+  const auto renderAssetPath = model->getRenderAsset();
+  if ((renderAssetPath) && (*renderAssetPath != "")) {
+    // load associated skinned mesh
+    assets::AssetInfo assetInfo = assets::AssetInfo::fromPath(*renderAssetPath);
+    assets::RenderAssetInstanceCreationInfo creationInfo;
+    creationInfo.filepath = *renderAssetPath;
+    creationInfo.lightSetupKey = lightSetup;
+    creationInfo.scale =
+        artObjAttributes->getUniformScale() * Mn::Vector3(1.f, 1.f, 1.f);
+    creationInfo.rig = articulatedObject;
+    esp::assets::RenderAssetInstanceCreationInfo::Flags flags;
+    flags |= esp::assets::RenderAssetInstanceCreationInfo::Flag::IsRGBD;
+    flags |= esp::assets::RenderAssetInstanceCreationInfo::Flag::IsSemantic;
+    creationInfo.flags = flags;
+    auto* gfxNode = resourceManager_.loadAndCreateRenderAssetInstance(
+        assetInfo, creationInfo, objectNode, drawables);
+    // Propagate the semantic ID to the graphics subtree
+    esp::scene::setSemanticIdForSubtree(
+        gfxNode, articulatedObject->node().getSemanticId());
+  }
 
   // allocate ids for links
   for (int linkIx = 0; linkIx < articulatedObject->btMultiBody_->getNumLinks();
@@ -170,20 +186,27 @@ int BulletPhysicsManager::addArticulatedObjectFromURDF(
         articulatedObject->btMultiBody_->getLinkCollider(linkIx), linkObjectId);
   }
 
-  // attach link visual shapes
-  for (size_t urdfLinkIx = 0; urdfLinkIx < u2b->getModel()->m_links.size();
-       ++urdfLinkIx) {
-    auto urdfLink = u2b->getModel()->getLink(urdfLinkIx);
-    if (!urdfLink->m_visualArray.empty()) {
-      int bulletLinkIx =
-          u2b->cache->m_urdfLinkIndices2BulletLinkIndices[urdfLinkIx];
-      ArticulatedLink& linkObject = articulatedObject->getLink(bulletLinkIx);
-      ESP_CHECK(
-          attachLinkGeometry(&linkObject, urdfLink, drawables, lightSetup),
-          "BulletPhysicsManager::addArticulatedObjectFromURDF(): Failed to "
-          "instance render asset (attachGeometry) for link"
-              << urdfLinkIx << ".");
-      linkObject.node().computeCumulativeBB();
+  // render visual shapes if either no skinned mesh is present or if the render
+  // visual shapes flag is enabled
+  bool renderVisualShapes = !renderAssetPath || (*renderAssetPath == "") ||
+                            model->getRenderLinkVisualShapes();
+  if (renderVisualShapes) {
+    // attach link visual shapes
+    for (size_t urdfLinkIx = 0; urdfLinkIx < model->m_links.size();
+         ++urdfLinkIx) {
+      auto urdfLink = model->getLink(urdfLinkIx);
+      if (!urdfLink->m_visualArray.empty()) {
+        int bulletLinkIx =
+            u2b->cache->m_urdfLinkIndices2BulletLinkIndices[urdfLinkIx];
+        ArticulatedLink& linkObject = articulatedObject->getLink(bulletLinkIx);
+        ESP_CHECK(
+            attachLinkGeometry(&linkObject, urdfLink, drawables, lightSetup,
+                               articulatedObject->node().getSemanticId()),
+            "BulletPhysicsManager::addArticulatedObject(): Failed to "
+            "instance render asset (attachGeometry) for link"
+                << urdfLinkIx << ".");
+        linkObject.node().computeCumulativeBB();
+      }
     }
   }
 
@@ -198,12 +221,7 @@ int BulletPhysicsManager::addArticulatedObjectFromURDF(
                                       std::move(articulatedObject));
 
   // get a simplified name of the handle for the object
-  std::string simpleArtObjHandle =
-      Corrade::Utility::Path::splitExtension(
-          Corrade::Utility::Path::splitExtension(
-              Corrade::Utility::Path::split(filepath).second())
-              .first())
-          .first();
+  std::string simpleArtObjHandle = artObjAttributes->getSimplifiedHandle();
 
   std::string newArtObjectHandle =
       articulatedObjectManager_->getUniqueHandleFromCandidate(
@@ -222,10 +240,12 @@ int BulletPhysicsManager::addArticulatedObjectFromURDF(
       existingArticulatedObjects_.at(articulatedObjectID));
 
   // 4.0 register wrapper in manager
-  articulatedObjectManager_->registerObject(AObjWrapper, newArtObjectHandle);
+  articulatedObjectManager_->registerObject(std::move(AObjWrapper),
+                                            newArtObjectHandle);
 
   return articulatedObjectID;
-}  // BulletPhysicsManager::addArticulatedObjectFromURDF
+
+}  // BulletPhysicsManager::addArticulatedObject
 
 esp::physics::ManagedRigidObject::ptr
 BulletPhysicsManager::getRigidObjectWrapper() {
@@ -240,47 +260,13 @@ BulletPhysicsManager::getArticulatedObjectWrapper() {
       "ManagedBulletArticulatedObject");
 }
 
-//! Check if mesh primitive is compatible with physics
-bool BulletPhysicsManager::isMeshPrimitiveValid(
-    const assets::CollisionMeshData& meshData) {
-  if (meshData.primitive == Magnum::MeshPrimitive::Triangles) {
-    //! Only triangle mesh works
-    return true;
-  } else {
-    switch (meshData.primitive) {
-      case Magnum::MeshPrimitive::Lines:
-        ESP_ERROR() << "Invalid primitive: Lines";
-        break;
-      case Magnum::MeshPrimitive::Points:
-        ESP_ERROR() << "Invalid primitive: Points";
-        break;
-      case Magnum::MeshPrimitive::LineLoop:
-        ESP_ERROR() << "Invalid primitive Line loop";
-        break;
-      case Magnum::MeshPrimitive::LineStrip:
-        ESP_ERROR() << "Invalid primitive Line Strip";
-        break;
-      case Magnum::MeshPrimitive::TriangleStrip:
-        ESP_ERROR() << "Invalid primitive Triangle Strip";
-        break;
-      case Magnum::MeshPrimitive::TriangleFan:
-        ESP_ERROR() << "Invalid primitive Triangle Fan";
-        break;
-      default:
-        ESP_ERROR() << "Invalid primitive" << int(meshData.primitive);
-    }
-    ESP_ERROR() << "Cannot load collision mesh, skipping";
-    return false;
-  }
-}
-
 bool BulletPhysicsManager::attachLinkGeometry(
     ArticulatedLink* linkObject,
-    const std::shared_ptr<io::URDF::Link>& link,
+    const std::shared_ptr<metadata::URDF::Link>& link,
     gfx::DrawableGroup* drawables,
-    const std::string& lightSetup) {
+    const std::string& lightSetup,
+    int semanticId) {
   const bool forceFlatShading = (lightSetup == esp::NO_LIGHT_KEY);
-  bool geomSuccess = false;
 
   for (auto& visual : link->m_visualArray) {
     bool visualSetupSuccess = true;
@@ -298,7 +284,7 @@ bool BulletPhysicsManager::attachLinkGeometry(
     visualMeshInfo.forceFlatShading = forceFlatShading;
 
     // create a modified asset if necessary for material override
-    std::shared_ptr<io::URDF::Material> material =
+    std::shared_ptr<metadata::URDF::Material> material =
         visual.m_geometry.m_localMaterial;
     if (material) {
       visualMeshInfo.overridePhongMaterial = assets::PhongMaterialColor();
@@ -311,7 +297,7 @@ bool BulletPhysicsManager::attachLinkGeometry(
     }
 
     switch (visual.m_geometry.m_type) {
-      case io::URDF::GEOM_CAPSULE:
+      case metadata::URDF::GEOM_CAPSULE:
         visualMeshInfo.type = esp::assets::AssetType::PRIMITIVE;
         // should be registered and cached already
         visualMeshInfo.filepath = visual.m_geometry.m_meshFileName;
@@ -323,7 +309,7 @@ bool BulletPhysicsManager::attachLinkGeometry(
             visualGeomComponent.transformation() *
             Mn::Matrix4::rotationX(Mn::Rad(M_PI_2)));
         break;
-      case io::URDF::GEOM_CYLINDER:
+      case metadata::URDF::GEOM_CYLINDER:
         visualMeshInfo.type = esp::assets::AssetType::PRIMITIVE;
         // the default created primitive handle for the cylinder with radius 1
         // and length 2
@@ -339,23 +325,23 @@ bool BulletPhysicsManager::attachLinkGeometry(
             visualGeomComponent.transformation() *
             Mn::Matrix4::rotationX(Mn::Rad(M_PI_2)));
         break;
-      case io::URDF::GEOM_BOX:
+      case metadata::URDF::GEOM_BOX:
         visualMeshInfo.type = esp::assets::AssetType::PRIMITIVE;
         visualMeshInfo.filepath = "cubeSolid";
         visualGeomComponent.scale(visual.m_geometry.m_boxSize * 0.5);
         break;
-      case io::URDF::GEOM_SPHERE: {
+      case metadata::URDF::GEOM_SPHERE: {
         visualMeshInfo.type = esp::assets::AssetType::PRIMITIVE;
         // default sphere prim is already constructed w/ radius 1
         visualMeshInfo.filepath = "icosphereSolid_subdivs_1";
         visualGeomComponent.scale(
             Mn::Vector3(visual.m_geometry.m_sphereRadius));
       } break;
-      case io::URDF::GEOM_MESH: {
+      case metadata::URDF::GEOM_MESH: {
         visualGeomComponent.scale(visual.m_geometry.m_meshScale);
         visualMeshInfo.filepath = visual.m_geometry.m_meshFileName;
       } break;
-      case io::URDF::GEOM_PLANE:
+      case metadata::URDF::GEOM_PLANE:
         ESP_DEBUG() << "Trying to add visual plane, not implemented";
         // TODO:
         visualSetupSuccess = false;
@@ -374,19 +360,22 @@ bool BulletPhysicsManager::attachLinkGeometry(
       assets::RenderAssetInstanceCreationInfo creation(
           visualMeshInfo.filepath, Mn::Vector3{1}, flags, lightSetup);
 
-      geomSuccess = resourceManager_.loadAndCreateRenderAssetInstance(
-                        visualMeshInfo, creation, &visualGeomComponent,
-                        drawables, &linkObject->visualNodes_) != nullptr;
+      auto* geomNode = resourceManager_.loadAndCreateRenderAssetInstance(
+          visualMeshInfo, creation, &visualGeomComponent, drawables,
+          &linkObject->visualNodes_);
 
-      // cache the visual component for later query
-      if (geomSuccess) {
+      if (geomNode) {
+        // Propagate the semantic ID to the graphics subtree
+        esp::scene::setSemanticIdForSubtree(&visualGeomComponent, semanticId);
+        // cache the visual component for later query
         linkObject->visualAttachments_.emplace_back(
             &visualGeomComponent, visual.m_geometry.m_meshFileName);
+        return true;
       }
     }
   }
 
-  return geomSuccess;
+  return false;
 }
 
 void BulletPhysicsManager::setGravity(const Magnum::Vector3& gravity) {
@@ -521,8 +510,7 @@ RaycastResults BulletPhysicsManager::castRay(const esp::geo::Ray& ray,
     hit.normal = Magnum::Vector3{allResults.m_hitNormalWorld[i]};
     hit.point = Magnum::Vector3{allResults.m_hitPointWorld[i]};
     hit.rayDistance =
-        (static_cast<double>(allResults.m_hitFractions[i]) * maxDistance) /
-        rayLength;
+        (static_cast<double>(allResults.m_hitFractions[i]) * maxDistance);
     // default to -1 for "scene collision" if we don't know which object was
     // involved
     hit.objectId = -1;
@@ -610,7 +598,7 @@ std::vector<ContactPointData> BulletPhysicsManager::getContactPoints() const {
       pt.positionOnAInWS = Mn::Vector3(srcPt.getPositionWorldOnA());
       pt.positionOnBInWS = Mn::Vector3(srcPt.getPositionWorldOnB());
 
-      // convert impulses to forces w/ recent physics timstep
+      // convert impulses to forces w/ recent physics timestep
       pt.normalForce =
           static_cast<double>(srcPt.getAppliedImpulse()) / recentTimeStep_;
 
@@ -763,7 +751,7 @@ int BulletPhysicsManager::createRigidConstraint(
     }
   }
 
-  // link objects to their consraints for later deactivation/removal logic
+  // link objects to their constraints for later deactivation/removal logic
   objectConstraints_[settings.objectIdA].push_back(nextConstraintId_);
   if (settings.objectIdB != ID_UNDEFINED) {
     objectConstraints_[settings.objectIdB].push_back(nextConstraintId_);
