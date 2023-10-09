@@ -24,6 +24,7 @@ ClassicReplayRenderer::ClassicReplayRenderer(
   config_ = cfg;
   SimulatorConfiguration simConfig;
   simConfig.createRenderer = true;
+  simConfig.frustumCulling = cfg.enableFrustumCulling;
   auto metadataMediator = metadata::MetadataMediator::create(simConfig);
   resourceManager_ =
       std::make_unique<assets::ResourceManager>(std::move(metadataMediator));
@@ -49,6 +50,44 @@ ClassicReplayRenderer::ClassicReplayRenderer(
     }
     void changeLightSetup(const gfx::LightSetup& lights) override {
       return self_.resourceManager_->setLightSetup(lights);
+    }
+
+    void createRigInstance(int rigId,
+                           const std::vector<std::string>& boneNames) override {
+      auto& rigManager = self_.resourceManager_->getRigManager();
+      ESP_CHECK(!rigManager.rigInstanceExists(rigId),
+                "A rig instance with the specified ID already exists.");
+
+      gfx::Rig rig{};
+      for (int i = 0; i < boneNames.size(); ++i) {
+        const std::string& boneName = boneNames[i];
+        rig.boneNames[boneName] = i;
+
+        // Create the nodes that control the pose of the rigged object.
+        const auto& env = self_.envs_[envIdx_];
+        auto& rootNode =
+            self_.sceneManager_->getSceneGraph(env.sceneID_).getRootNode();
+        auto* boneNode = &rootNode.createChild();
+        rig.bones.push_back(boneNode);
+      }
+
+      rigManager.registerRigInstance(rigId, std::move(rig));
+    }
+
+    void deleteRigInstance(int rigId) override {
+      self_.resourceManager_->getRigManager().deleteRigInstance(rigId);
+    }
+
+    void setRigPose(int rigId,
+                    const std::vector<gfx::replay::Transform>& pose) override {
+      auto& rig = self_.resourceManager_->getRigManager().getRigInstance(rigId);
+      const size_t boneCount = rig.bones.size();
+      for (int i = 0; i < boneCount; ++i) {
+        const auto& transform = pose[i];
+        rig.bones[i]
+            ->setTranslation(transform.translation)
+            .setRotation(transform.rotation);
+      }
     }
 
     ClassicReplayRenderer& self_;
@@ -99,6 +138,10 @@ ClassicReplayRenderer::ClassicReplayRenderer(
     }
 
     gfx::Renderer::Flags flags;
+
+    if (config_.enableHBAO)
+      flags |= gfx::Renderer::Flag::HorizonBasedAmbientOcclusion;
+
 #ifdef ESP_BUILD_WITH_BACKGROUND_RENDERER
     if (context_)
       flags |= gfx::Renderer::Flag::BackgroundRenderer;
@@ -236,11 +279,14 @@ void ClassicReplayRenderer::doRender(
       }
 
 #ifdef ESP_BUILD_WITH_BACKGROUND_RENDERER
+      esp::gfx::RenderCamera::Flags flags{};
+      if (config_.enableFrustumCulling) {
+        flags |= gfx::RenderCamera::Flag::FrustumCulling;
+      }
+
       if (imageViews.size() > 0) {
-        renderer_->enqueueAsyncDrawJob(
-            visualSensor, sceneGraph, imageViews[envIndex],
-            esp::gfx::RenderCamera::Flags{
-                gfx::RenderCamera::Flag::FrustumCulling});
+        renderer_->enqueueAsyncDrawJob(visualSensor, sceneGraph,
+                                       imageViews[envIndex], flags);
       }
 #else
       // TODO what am I supposed to do here?
@@ -258,6 +304,10 @@ void ClassicReplayRenderer::doRender(
 void ClassicReplayRenderer::doRender(
     Magnum::GL::AbstractFramebuffer& framebuffer) {
   const Mn::Vector2i gridSize = environmentGridSize(config_.numEnvironments);
+  esp::gfx::RenderCamera::Flags flags{};
+  if (config_.enableFrustumCulling) {
+    flags |= gfx::RenderCamera::Flag::FrustumCulling;
+  }
 
   for (int envIndex = 0; envIndex < config_.numEnvironments; envIndex++) {
     auto& sensorMap = getEnvironmentSensors(envIndex);
@@ -269,9 +319,13 @@ void ClassicReplayRenderer::doRender(
     visualSensor.renderTarget().renderEnter();
 
     auto& sceneGraph = getSceneGraph(envIndex);
-    renderer_->draw(
-        *visualSensor.getRenderCamera(), sceneGraph,
-        esp::gfx::RenderCamera::Flags{gfx::RenderCamera::Flag::FrustumCulling});
+
+    renderer_->draw(*visualSensor.getRenderCamera(), sceneGraph, flags);
+
+    if (visualSensor.specification()->sensorType == sensor::SensorType::Color) {
+      // include HBAO in Color sensors (only if enabled for render target)
+      visualSensor.renderTarget().tryDrawHbao();
+    }
 
     if (envIndex == 0 && debugLineRender_) {
       auto* camera = visualSensor.getRenderCamera();

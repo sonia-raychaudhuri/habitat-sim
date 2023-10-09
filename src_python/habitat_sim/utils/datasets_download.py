@@ -106,7 +106,7 @@ def initialize_test_data_sources(data_path):
         "habitat_test_scenes": {
             "source": "https://huggingface.co/datasets/ai-habitat/habitat_test_scenes.git",
             "link": data_path + "scene_datasets/habitat-test-scenes",
-            "version": "v1.0",
+            "version": "main",
         },
         "habitat_test_pointnav_dataset": {
             "source": "http://dl.fbaipublicfiles.com/habitat/habitat-test-pointnav-dataset_v1.0.zip",
@@ -337,6 +337,7 @@ def initialize_test_data_sources(data_path):
             "replica_cad_dataset",
             "hab_fetch",
             "hab_stretch",
+            "hab_spot_arm",
         ],
         "rearrange_task_assets": [
             "replica_cad_dataset",
@@ -576,6 +577,7 @@ def clone_repo_source(
     print(" ".join(split_command))
 
     subprocess.check_call(split_command)
+    subprocess.check_call(shlex.split("git lfs pull"), cwd=version_dir)
 
     if prune_lfs:
         # NOTE: we make this optional because older git versions don't support "-f --recent"
